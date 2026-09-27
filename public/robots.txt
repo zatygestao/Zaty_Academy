@@ -1,0 +1,21 @@
+# robots.txt para Zaty Academy
+User-agent: *
+Allow: /
+Allow: /sobre
+Allow: /cursos
+Allow: /noticias
+Allow: /contactos
+Allow: /inscricao
+Allow: /validar
+Allow: /privacidade
+Allow: /termos
+Allow: /faq
+
+# Bloqueio de indexação das áreas operacionais e autenticadas
+Disallow: /admin/
+Disallow: /estudante/
+Disallow: /formador/
+Disallow: /recuperar-senha
+Disallow: /redefinir-senha
+
+Sitemap: https://zatyacademy.co.mz/sitemap.xml

@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <!-- Página Inicial -->
+  <url>
+    <loc>https://zatyacademy.co.mz/</loc>
+    <lastmod>2026-09-19</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>1.0</priority>
+  </url>
+
+  <!-- Inscrição Online -->
+  <url>
+    <loc>https://zatyacademy.co.mz/inscricao</loc>
+    <lastmod>2026-09-19</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.9</priority>
+  </url>
+
+  <!-- Catálogo de Cursos -->
+  <url>
+    <loc>https://zatyacademy.co.mz/cursos</loc>
+    <lastmod>2026-09-19</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.9</priority>
+  </url>
+
+  <!-- Notícias & Artigos -->
+  <url>
+    <loc>https://zatyacademy.co.mz/noticias</loc>
+    <lastmod>2026-09-19</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>0.8</priority>
+  </url>
+
+  <!-- Validação Pública de Certificados -->
+  <url>
+    <loc>https://zatyacademy.co.mz/validar</loc>
+    <lastmod>2026-09-19</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+  </url>
+
+  <!-- Sobre Nós -->
+  <url>
+    <loc>https://zatyacademy.co.mz/sobre</loc>
+    <lastmod>2026-09-19</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+
+  <!-- Contactos -->
+  <url>
+    <loc>https://zatyacademy.co.mz/contactos</loc>
+    <lastmod>2026-09-19</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+
+  <!-- Perguntas Frequentes / FAQ -->
+  <url>
+    <loc>https://zatyacademy.co.mz/faq</loc>
+    <lastmod>2026-09-19</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+
+  <!-- Política de Privacidade -->
+  <url>
+    <loc>https://zatyacademy.co.mz/privacidade</loc>
+    <lastmod>2026-09-19</lastmod>
+    <changefreq>yearly</changefreq>
+    <priority>0.5</priority>
+  </url>
+
+  <!-- Termos de Uso -->
+  <url>
+    <loc>https://zatyacademy.co.mz/termos</loc>
+    <lastmod>2026-09-19</lastmod>
+    <changefreq>yearly</changefreq>
+    <priority>0.5</priority>
+  </url>
+</urlset>

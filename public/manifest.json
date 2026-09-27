@@ -1,0 +1,35 @@
+{
+  "name": "ZATY ACADEMY — Centro de Formação em Informática e Tecnologia",
+  "short_name": "Zaty Academy",
+  "description": "Centro de Formação em Informática e Tecnologia em Moçambique. Inscrições abertas, cursos profissionais, laboratórios e certificados digitais com QR Code.",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#00203a",
+  "theme_color": "#004b87",
+  "lang": "pt-MZ",
+  "icons": [
+    {
+      "src": "/favicon.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/apple-touch-icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ],
+  "categories": [
+    "education",
+    "productivity"
+  ]
+}
