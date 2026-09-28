@@ -1008,50 +1008,6 @@ a {
   box-shadow: 0 16px 36px -8px rgba(0, 0, 0, 0.7), 0 0 24px rgba(0, 199, 253, 0.16) !important;
 }
 
-/* =========================================================
-   TEXTURA DE FUNDO EXCLUSIVA DA PÁGINA INICIAL
-   Reprodução fiel do padrão, aparência e distribuição da referência
-   ========================================================= */
-.home-page-wrapper {
-  position: relative;
-  width: 100%;
-  overflow-x: hidden;
-}
-
-.home-background-texture {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  width: 100%;
-  height: 100%;
-  background-image: url('/images/home-bg-texture.webp');
-  background-repeat: repeat-y;
-  background-position: top center;
-  background-size: 1366px auto;
-  pointer-events: none;
-  z-index: 1;
-  opacity: 0.95;
-}
-
-.home-page-wrapper .container {
-  position: relative;
-  z-index: 2;
-}
-
-@media (max-width: 1024px) {
-  .home-background-texture {
-    background-size: 1024px auto;
-  }
-}
-
-@media (max-width: 640px) {
-  .home-background-texture {
-    background-size: 640px auto;
-  }
-}
-
 .mobile-bottom-nav {
   display:none
 }
