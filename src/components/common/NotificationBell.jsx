@@ -268,23 +268,7 @@ export default function NotificationBell() {
       {/* POPOVER DE NOTIFICAÇÕES */}
       {isOpen && (
         <div 
-          style={{
-            position: 'absolute',
-            top: 'calc(100% + 10px)',
-            right: 0,
-            width: 'clamp(320px, 90vw, 390px)',
-            maxHeight: '480px',
-            background: 'rgba(0, 18, 36, 0.98)',
-            backdropFilter: 'blur(20px)',
-            WebkitBackdropFilter: 'blur(20px)',
-            border: '1.5px solid rgba(0, 199, 253, 0.35)',
-            borderRadius: '12px',
-            boxShadow: '0 16px 40px rgba(0, 0, 0, 0.6), 0 0 25px rgba(0, 199, 253, 0.15)',
-            zIndex: 1000,
-            display: 'flex',
-            flexDirection: 'column',
-            overflow: 'hidden'
-          }}
+          className="notification-popover"
         >
           {/* CABEÇALHO DO DROPDOWN */}
           <div style={{
@@ -307,29 +291,50 @@ export default function NotificationBell() {
               )}
             </div>
 
-            {unreadCount > 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+              {unreadCount > 0 && (
+                <button
+                  type="button"
+                  onClick={handleMarkAllAsRead}
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    color: '#00C7FD',
+                    fontSize: '0.72rem',
+                    fontWeight: '600',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.25rem',
+                    padding: '0.2rem 0.4rem',
+                    borderRadius: '4px'
+                  }}
+                  title="Marcar todas como lidas"
+                >
+                  <CheckCheck size={14} />
+                  <span>Marcar lidas</span>
+                </button>
+              )}
               <button
                 type="button"
-                onClick={handleMarkAllAsRead}
+                onClick={() => setIsOpen(false)}
                 style={{
                   background: 'transparent',
                   border: 'none',
-                  color: '#00C7FD',
-                  fontSize: '0.72rem',
-                  fontWeight: '600',
+                  color: '#94A3B8',
                   cursor: 'pointer',
-                  display: 'flex',
+                  padding: '0.2rem',
+                  display: 'inline-flex',
                   alignItems: 'center',
-                  gap: '0.25rem',
-                  padding: '0.2rem 0.4rem',
-                  borderRadius: '4px'
+                  justifyContent: 'center',
+                  lineHeight: 1
                 }}
-                title="Marcar todas como lidas"
+                title="Fechar Notificações"
+                aria-label="Fechar"
               >
-                <CheckCheck size={14} />
-                <span>Marcar lidas</span>
+                <X size={16} />
               </button>
-            )}
+            </div>
           </div>
 
           {/* ABAS: TODAS / NÃO LIDAS */}

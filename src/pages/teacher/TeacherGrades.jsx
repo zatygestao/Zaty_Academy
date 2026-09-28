@@ -27,8 +27,10 @@ import {
   AlertTriangle,
   HelpCircle,
   Wrench,
-  GraduationCap
+  GraduationCap,
+  Printer
 } from 'lucide-react';
+import PautaPrintModal from '../../components/admin/PautaPrintModal';
 
 export default function TeacherGrades() {
   const { teacher, user } = useAuth();
@@ -56,6 +58,7 @@ export default function TeacherGrades() {
   const [showCreateEvalModal, setShowCreateEvalModal] = useState(false);
   const [showRecoveryModal, setShowRecoveryModal] = useState(false);
   const [showConfirmLockModal, setShowConfirmLockModal] = useState(false);
+  const [showPautaPrintModal, setShowPautaPrintModal] = useState(false);
   const [savingGrades, setSavingGrades] = useState(false);
   const [creatingEval, setCreatingEval] = useState(false);
 
@@ -553,9 +556,21 @@ export default function TeacherGrades() {
                 </p>
               </div>
 
-              <button onClick={loadOverview} className="btn btn-secondary btn-sm">
-                Atualizar Pauta
-              </button>
+              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  onClick={() => setShowPautaPrintModal(true)}
+                  disabled={!overviewData || overviewData.studentsRows?.length === 0}
+                  className="btn btn-primary btn-sm"
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}
+                >
+                  <Printer size={15} />
+                  <span>Imprimir Pauta Oficial</span>
+                </button>
+                <button onClick={loadOverview} className="btn btn-secondary btn-sm">
+                  Atualizar Pauta
+                </button>
+              </div>
             </div>
 
             {loadingOverview ? (
@@ -1325,6 +1340,19 @@ export default function TeacherGrades() {
               </form>
             </div>
           </div>
+        )}
+
+        {/* MODAL DE IMPRESSÃO / EXPORTAÇÃO DA PAUTA OFICIAL */}
+        {showPautaPrintModal && (
+          <PautaPrintModal
+            isOpen={showPautaPrintModal}
+            onClose={() => setShowPautaPrintModal(false)}
+            classInfo={selectedClass}
+            course={selectedClass?.course}
+            evaluations={overviewData?.evaluations || evaluations}
+            studentsRows={overviewData?.studentsRows || []}
+            academicYear="2026"
+          />
         )}
       </main>
     </div>

@@ -7,7 +7,8 @@ import {
   toggleLessonProgress, 
   getCourseBySlug,
   getStudentCertificates,
-  getStudentGradesReport
+  getStudentGradesReport,
+  deduplicateEnrollments
 } from '../../services/api';
 import { generateCertificatePdf, printPdfDoc } from '../../services/pdfService';
 import StudentSidebar from '../../components/student/StudentSidebar';
@@ -60,8 +61,11 @@ export default function StudentCourses() {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
 
-  const enrollments = student?.enrollments || [];
-  const activeEnrollment = enrollments[selectedEnrollmentIndex] || enrollments[0];
+  const enrollments = useMemo(() => {
+    return deduplicateEnrollments(student?.enrollments || []);
+  }, [student?.enrollments]);
+  const validIndex = (selectedEnrollmentIndex >= 0 && selectedEnrollmentIndex < enrollments.length) ? selectedEnrollmentIndex : 0;
+  const activeEnrollment = enrollments[validIndex] || enrollments[0];
   const activeCourse = activeEnrollment?.course;
   const activeClass = activeEnrollment?.class;
   const isCourseCompleted = activeEnrollment?.status === 'concluido' || 

@@ -1984,4 +1984,114 @@ a {
   }
 }
 
+/* =========================================================
+   SISTEMA DE NOTIFICAÇÕES - POPOVER RESPONSIVO
+   ========================================================= */
+.notification-popover {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  width: 380px;
+  max-width: 90vw;
+  max-height: 480px;
+  background: rgba(0, 18, 36, 0.98);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1.5px solid rgba(0, 199, 253, 0.35);
+  border-radius: 12px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6), 0 0 25px rgba(0, 199, 253, 0.15);
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+@media (max-width: 640px) {
+  .notification-popover {
+    position: fixed !important;
+    top: 60px !important;
+    left: 0.75rem !important;
+    right: 0.75rem !important;
+    width: auto !important;
+    max-width: calc(100vw - 1.5rem) !important;
+    max-height: calc(100vh - 75px) !important;
+    border-radius: 10px !important;
+  }
+}
+
+/* =========================================================
+   PAUTA OFICIAL DE AVALIAÇÃO - REGRAS DE IMPRESSÃO
+   ========================================================= */
+@media print {
+  @page {
+    size: A4 landscape;
+    margin: 8mm;
+  }
+
+  body {
+    background: #FFFFFF !important;
+    color: #000000 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  .sidebar,
+  .sidebar-layout > aside,
+  .navbar,
+  header,
+  .modal-close,
+  .btn,
+  button,
+  .no-print {
+    display: none !important;
+  }
+
+  .sidebar-layout {
+    display: block !important;
+    min-height: auto !important;
+  }
+
+  .sidebar-layout > main {
+    margin-left: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+  }
+
+  .modal-overlay {
+    position: static !important;
+    background: transparent !important;
+    padding: 0 !important;
+    display: block !important;
+  }
+
+  .modal-container {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    max-width: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  .pauta-official-document-view {
+    box-shadow: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    page-break-inside: avoid;
+  }
+
+  .pauta-official-document-view table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+  }
+
+  .pauta-official-document-view th,
+  .pauta-official-document-view td {
+    padding: 4px 6px !important;
+    font-size: 7.5pt !important;
+  }
+}
+
 

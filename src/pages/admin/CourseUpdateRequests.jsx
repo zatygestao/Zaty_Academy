@@ -26,7 +26,8 @@ import {
   Ban, 
   ChevronRight,
   RefreshCw,
-  Sparkles
+  Sparkles,
+  Info
 } from 'lucide-react';
 
 export default function CourseUpdateRequests() {
@@ -540,30 +541,30 @@ export default function CourseUpdateRequests() {
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.85rem', fontSize: '0.82rem' }}>
                   <div>
                     <span style={{ color: '#94A3B8', fontSize: '0.72rem', textTransform: 'uppercase' }}>Estudante</span>
-                    <strong style={{ color: '#FFFFFF', display: 'block', fontSize: '0.9rem' }}>{selectedRequest.student_name}</strong>
-                    <span style={{ color: '#00C7FD', fontFamily: 'monospace' }}>Código: {selectedRequest.student_code}</span>
+                    <strong style={{ color: '#FFFFFF', display: 'block', fontSize: '0.9rem' }}>{selectedRequest?.student_name || 'Estudante'}</strong>
+                    <span style={{ color: '#00C7FD', fontFamily: 'monospace' }}>Código: {selectedRequest?.student_code || 'ZA'}</span>
                   </div>
 
                   <div>
                     <span style={{ color: '#94A3B8', fontSize: '0.72rem', textTransform: 'uppercase' }}>Data & Hora do Pedido</span>
-                    <strong style={{ color: '#FFFFFF', display: 'block' }}>{formatDateTime(selectedRequest.created_at)}</strong>
+                    <strong style={{ color: '#FFFFFF', display: 'block' }}>{formatDateTime(selectedRequest?.created_at)}</strong>
                   </div>
 
                   <div>
                     <span style={{ color: '#94A3B8', fontSize: '0.72rem', textTransform: 'uppercase' }}>Curso Anterior</span>
-                    <strong style={{ color: '#CBD5E1', display: 'block' }}>{selectedRequest.previous_course_title || 'Nenhum'}</strong>
+                    <strong style={{ color: '#CBD5E1', display: 'block' }}>{selectedRequest?.previous_course_title || 'Nenhum'}</strong>
                   </div>
 
                   <div>
                     <span style={{ color: '#94A3B8', fontSize: '0.72rem', textTransform: 'uppercase' }}>Novo Curso Solicitado</span>
-                    <strong style={{ color: '#34D399', display: 'block' }}>{selectedRequest.new_course_title}</strong>
+                    <strong style={{ color: '#34D399', display: 'block' }}>{selectedRequest?.new_course_title || 'Curso'}</strong>
                     <span style={{ color: '#6EE7B7', fontSize: '0.74rem' }}>
-                      Valor: {Number(selectedRequest.new_course_price) > 0 ? formatCurrency(selectedRequest.new_course_price) : 'Gratuito / Isento'}
+                      Valor: {Number(selectedRequest?.new_course_price) > 0 ? formatCurrency(selectedRequest?.new_course_price) : 'Gratuito / Isento'}
                     </span>
                   </div>
                 </div>
 
-                {selectedRequest.reason && (
+                {selectedRequest?.reason && (
                   <div style={{ marginTop: '0.85rem', paddingTop: '0.75rem', borderTop: '1px solid rgba(0, 163, 224, 0.15)' }}>
                     <span style={{ color: '#94A3B8', fontSize: '0.72rem', textTransform: 'uppercase' }}>Justificativa do Estudante</span>
                     <p style={{ color: '#E2E8F0', fontSize: '0.82rem', margin: '0.2rem 0 0 0', lineHeight: 1.4 }}>
@@ -578,9 +579,9 @@ export default function CourseUpdateRequests() {
                 <div>
                   <div style={{ padding: '0.85rem', borderRadius: '6px', background: 'rgba(0, 199, 253, 0.1)', border: '1px solid rgba(0, 199, 253, 0.3)', marginBottom: '1rem', fontSize: '0.82rem', color: '#BAE6FD', lineHeight: 1.4 }}>
                     <Info size={16} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '6px', color: '#00C7FD' }} />
-                    {Number(selectedRequest.new_course_price) > 0 ? (
+                    {Number(selectedRequest?.new_course_price) > 0 ? (
                       <span>
-                        Este curso tem o valor de <strong>{formatCurrency(selectedRequest.new_course_price)}</strong>. Ao aprovar, o sistema notificará o estudante solicitando o respetivo pagamento. A liberação definitiva do percurso será efetuada após a validação do comprovativo financeiro.
+                        Este curso tem o valor de <strong>{formatCurrency(selectedRequest?.new_course_price)}</strong>. Ao aprovar, o sistema notificará o estudante solicitando o respetivo pagamento. A liberação definitiva do percurso será efetuada após a validação do comprovativo financeiro.
                       </span>
                     ) : (
                       <span>
@@ -660,7 +661,7 @@ export default function CourseUpdateRequests() {
                 <div>
                   <div style={{ padding: '0.85rem', borderRadius: '6px', background: 'rgba(16, 185, 129, 0.15)', border: '1px solid #10B981', marginBottom: '1rem', fontSize: '0.82rem', color: '#A7F3D0', lineHeight: 1.4 }}>
                     <CheckCircle2 size={16} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '6px', color: '#10B981' }} />
-                    Ao confirmar o pagamento da formação ({formatCurrency(selectedRequest.new_course_price)}), a matrícula anterior será arquivada como "Transferido" e a nova formação será <strong>imediatamente ativada</strong>. O estudante receberá a notificação oficial com acesso total liberado.
+                    Ao confirmar o pagamento da formação ({formatCurrency(selectedRequest?.new_course_price)}), a matrícula anterior será arquivada como "Transferido" e a nova formação será <strong>imediatamente ativada</strong>. O estudante receberá a notificação oficial com acesso total liberado.
                   </div>
 
                   <div className="form-group" style={{ marginBottom: '1.25rem' }}>
@@ -696,14 +697,14 @@ export default function CourseUpdateRequests() {
 
               {modalMode === 'view' && (
                 <div>
-                  {selectedRequest.admin_notes && (
+                  {selectedRequest?.admin_notes && (
                     <div style={{ marginBottom: '1rem' }}>
                       <span style={{ color: '#94A3B8', fontSize: '0.72rem', textTransform: 'uppercase' }}>Notas da Administração</span>
                       <p style={{ color: '#E2E8F0', fontSize: '0.85rem', margin: '0.2rem 0 0 0' }}>{selectedRequest.admin_notes}</p>
                     </div>
                   )}
 
-                  {selectedRequest.rejection_reason && (
+                  {selectedRequest?.rejection_reason && (
                     <div style={{ marginBottom: '1rem' }}>
                       <span style={{ color: '#FCA5A5', fontSize: '0.72rem', textTransform: 'uppercase' }}>Motivo da Rejeição</span>
                       <p style={{ color: '#EF4444', fontSize: '0.85rem', margin: '0.2rem 0 0 0' }}>{selectedRequest.rejection_reason}</p>
@@ -711,7 +712,7 @@ export default function CourseUpdateRequests() {
                   )}
 
                   <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', marginTop: '1.25rem' }}>
-                    {(selectedRequest.status === 'pendente' || selectedRequest.status === 'em_analise') && (
+                    {(selectedRequest?.status === 'pendente' || selectedRequest?.status === 'em_analise') && (
                       <>
                         <button
                           type="button"
@@ -733,7 +734,7 @@ export default function CourseUpdateRequests() {
                       </>
                     )}
 
-                    {selectedRequest.status === 'aprovada_aguardando_pagamento' && (
+                    {selectedRequest?.status === 'aprovada_aguardando_pagamento' && (
                       <button
                         type="button"
                         onClick={() => setModalMode('confirm_payment')}

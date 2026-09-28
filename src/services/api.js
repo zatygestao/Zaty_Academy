@@ -1658,6 +1658,55 @@ export async function checkStudentCourseEnrollmentEligibility(studentId, courseI
 /**
  * Obtém todas as matrículas de um estudante com dados do curso e turma
  */
+/**
+ * Consolida e deduplica com segurança uma lista de matrículas por curso.
+ * Garante que cada curso apareça exatamente UMA vez, priorizando o melhor estado:
+ * 'ativo' > 'concluido' > 'em_curso' > 'pendente' > 'aprovada_aguardando_pagamento' > 'transferido' > 'cancelado'.
+ */
+export function deduplicateEnrollments(enrollmentsList = []) {
+  if (!Array.isArray(enrollmentsList) || enrollmentsList.length <= 1) {
+    return enrollmentsList || [];
+  }
+
+  const statusPriority = {
+    'ativo': 100,
+    'concluido': 90,
+    'em_curso': 80,
+    'pendente': 50,
+    'aprovada_aguardando_pagamento': 40,
+    'transferido': 20,
+    'cancelado': 10
+  };
+
+  const map = new Map();
+
+  enrollmentsList.forEach(enr => {
+    if (!enr) return;
+    const courseId = enr.course_id || enr.course?.id;
+    if (!courseId) return;
+
+    const existing = map.get(courseId);
+    if (!existing) {
+      map.set(courseId, enr);
+    } else {
+      const existingScore = statusPriority[existing.status] || 0;
+      const currentScore = statusPriority[enr.status] || 0;
+
+      if (currentScore > existingScore) {
+        map.set(courseId, enr);
+      } else if (currentScore === existingScore) {
+        const existingDate = new Date(existing.created_at || existing.updated_at || 0).getTime();
+        const currentDate = new Date(enr.created_at || enr.updated_at || 0).getTime();
+        if (currentDate > existingDate) {
+          map.set(courseId, enr);
+        }
+      }
+    }
+  });
+
+  return Array.from(map.values());
+}
+
 export async function getStudentEnrollments(studentId) {
   if (!studentId) return [];
   try {
@@ -1671,7 +1720,7 @@ export async function getStudentEnrollments(studentId) {
       .eq('student_id', studentId)
       .order('created_at', { ascending: false });
 
-    if (!error && data) return data;
+    if (!error && data) return deduplicateEnrollments(data);
   } catch (err) {
     console.warn('Aviso ao obter matrículas do estudante:', err);
   }
@@ -1936,20 +1985,19 @@ export async function requestStudentCourseUpdate({
     updated_at: nowIso
   };
 
-  // 4. Inserir ou atualizar matrícula preliminar em estado 'pendente' no academy_enrollments
+  // 4. Inserir ou atualizar matrícula preliminar em estado 'pendente' no academy_enrollments (sem duplicar)
   try {
-    const { data: existingEnr } = await supabase
+    const { data: existingEnrs } = await supabase
       .from('academy_enrollments')
       .select('id')
       .eq('student_id', studentId)
-      .eq('course_id', newCourseId)
-      .maybeSingle();
+      .eq('course_id', newCourseId);
 
-    if (existingEnr?.id) {
+    if (existingEnrs && existingEnrs.length > 0) {
       await supabase
         .from('academy_enrollments')
         .update({ status: 'pendente', updated_at: nowIso })
-        .eq('id', existingEnr.id);
+        .eq('id', existingEnrs[0].id);
     } else {
       await supabase.from('academy_enrollments').insert([{
         student_id: studentId,
@@ -2089,7 +2137,19 @@ export async function getCourseUpdateRequests(filters = {}) {
     console.warn('Aviso ao consultar academy_course_update_requests no Supabase:', err?.message);
   }
 
-  // 1.5 Carregar matrículas pendentes em academy_enrollments (para garantir visibilidade total cross-device)
+  // 1.5 Carregar da store local resiliente (com precedência se tiver atualização recente)
+  localList.forEach(r => {
+    if (!map.has(r.id)) {
+      map.set(r.id, r);
+    } else {
+      const inMap = map.get(r.id);
+      if (new Date(r.updated_at || 0) >= new Date(inMap.updated_at || 0)) {
+        map.set(r.id, { ...inMap, ...r });
+      }
+    }
+  });
+
+  // 2. Carregar matrículas pendentes em academy_enrollments (para garantir visibilidade total cross-device)
   try {
     const { data: pendingEnrs } = await supabase
       .from('academy_enrollments')
@@ -2125,13 +2185,14 @@ export async function getCourseUpdateRequests(filters = {}) {
       } catch (_) {}
 
       pendingEnrs.forEach(enr => {
-        const alreadyExists = Array.from(map.values()).some(
-          r => r.student_id === enr.student_id && ['pendente', 'em_analise', 'aprovada_aguardando_pagamento'].includes(r.status)
+        const id = `enr_${enr.id}`;
+        // Não incluir se o mapa já tem essa solicitação (seja por id, ou pelo par student_id + new_course_id)
+        const alreadyExists = map.has(id) || Array.from(map.values()).some(
+          r => r.student_id === enr.student_id && (r.new_course_id === enr.course_id || ['pendente', 'em_analise', 'aprovada_aguardando_pagamento', 'concluido', 'rejeitada'].includes(r.status))
         );
 
         if (!alreadyExists) {
           const priorCourse = priorCourseMap.get(enr.student_id);
-          const id = `enr_${enr.id}`;
           map.set(id, {
             id,
             enrollment_id: enr.id,
@@ -2161,13 +2222,6 @@ export async function getCourseUpdateRequests(filters = {}) {
   } catch (enrErr) {
     console.warn('Aviso ao consultar matrículas pendentes para solicitações de curso:', enrErr?.message);
   }
-
-  // 2. Carregar da store local resiliente
-  localList.forEach(r => {
-    if (!map.has(r.id)) {
-      map.set(r.id, r);
-    }
-  });
 
   // 3. Carregar registos históricos da tabela de auditoria
   try {
@@ -2325,19 +2379,63 @@ export async function reviewCourseUpdateRequest({
 
   // Atualizar na base de dados Supabase (se criada)
   try {
-    await supabase
-      .from('academy_course_update_requests')
-      .update({
-        status: newStatus,
-        payment_status: newPaymentStatus,
-        admin_notes: adminNotes ? adminNotes.trim() : request.admin_notes,
-        rejection_reason: rejectionReason ? rejectionReason.trim() : request.rejection_reason,
-        reviewed_by: adminUserId,
-        reviewed_at: nowIso,
-        updated_at: nowIso
-      })
-      .eq('id', requestId);
-  } catch (_) {}
+    const isSynthetic = String(requestId).startsWith('enr_') || String(requestId).startsWith('audit_');
+    if (!isSynthetic) {
+      await supabase
+        .from('academy_course_update_requests')
+        .update({
+          status: newStatus,
+          payment_status: newPaymentStatus,
+          admin_notes: adminNotes ? adminNotes.trim() : request.admin_notes,
+          rejection_reason: rejectionReason ? rejectionReason.trim() : request.rejection_reason,
+          reviewed_by: adminUserId,
+          reviewed_at: nowIso,
+          updated_at: nowIso
+        })
+        .eq('id', requestId);
+    } else {
+      const { data: existing } = await supabase
+        .from('academy_course_update_requests')
+        .select('id')
+        .eq('student_id', targetStudentId)
+        .eq('new_course_id', request.new_course_id)
+        .maybeSingle();
+
+      if (existing) {
+        await supabase
+          .from('academy_course_update_requests')
+          .update({
+            status: newStatus,
+            payment_status: newPaymentStatus,
+            admin_notes: adminNotes ? adminNotes.trim() : request.admin_notes,
+            rejection_reason: rejectionReason ? rejectionReason.trim() : request.rejection_reason,
+            reviewed_by: adminUserId,
+            reviewed_at: nowIso,
+            updated_at: nowIso
+          })
+          .eq('id', existing.id);
+      } else {
+        await supabase
+          .from('academy_course_update_requests')
+          .insert([{
+            student_id: targetStudentId,
+            previous_course_id: request.previous_course_id,
+            new_course_id: request.new_course_id,
+            reason: request.reason || 'Atualização de curso',
+            status: newStatus,
+            payment_status: newPaymentStatus,
+            admin_notes: adminNotes ? adminNotes.trim() : request.admin_notes,
+            rejection_reason: rejectionReason ? rejectionReason.trim() : request.rejection_reason,
+            reviewed_by: adminUserId,
+            reviewed_at: nowIso,
+            created_at: request.created_at || nowIso,
+            updated_at: nowIso
+          }]);
+      }
+    }
+  } catch (dbErr) {
+    console.warn('Aviso ao sincronizar academy_course_update_requests no Supabase:', dbErr?.message);
+  }
 
   // Notificar o estudante
   try {
@@ -2411,21 +2509,20 @@ export async function confirmCourseUpdatePaymentAndActivate({
 
   // 1. Atualizar ou ativar matrícula no novo curso em academy_enrollments
   try {
-    const { data: existingEnr } = await supabase
+    const { data: existingEnrs } = await supabase
       .from('academy_enrollments')
       .select('id, status')
       .eq('student_id', studentId)
-      .eq('course_id', newCourseId)
-      .maybeSingle();
+      .eq('course_id', newCourseId);
 
-    if (existingEnr) {
+    if (existingEnrs && existingEnrs.length > 0) {
       await supabase
         .from('academy_enrollments')
         .update({
           status: 'ativo',
           updated_at: nowIso
         })
-        .eq('id', existingEnr.id);
+        .eq('id', existingEnrs[0].id);
     } else {
       await supabase
         .from('academy_enrollments')
@@ -2481,17 +2578,57 @@ export async function confirmCourseUpdatePaymentAndActivate({
 
   // Atualizar na base de dados Supabase (se criada)
   try {
-    await supabase
-      .from('academy_course_update_requests')
-      .update({
-        status: 'concluido',
-        payment_status: 'pago',
-        admin_notes: notes || request.admin_notes,
-        reviewed_by: adminUserId,
-        reviewed_at: nowIso,
-        updated_at: nowIso
-      })
-      .eq('id', requestId);
+    const isSynthetic = String(requestId).startsWith('enr_') || String(requestId).startsWith('audit_');
+    if (!isSynthetic) {
+      await supabase
+        .from('academy_course_update_requests')
+        .update({
+          status: 'concluido',
+          payment_status: 'pago',
+          admin_notes: notes || request.admin_notes,
+          reviewed_by: adminUserId,
+          reviewed_at: nowIso,
+          updated_at: nowIso
+        })
+        .eq('id', requestId);
+    } else {
+      const { data: existing } = await supabase
+        .from('academy_course_update_requests')
+        .select('id')
+        .eq('student_id', studentId)
+        .eq('new_course_id', newCourseId)
+        .maybeSingle();
+
+      if (existing) {
+        await supabase
+          .from('academy_course_update_requests')
+          .update({
+            status: 'concluido',
+            payment_status: 'pago',
+            admin_notes: notes || request.admin_notes,
+            reviewed_by: adminUserId,
+            reviewed_at: nowIso,
+            updated_at: nowIso
+          })
+          .eq('id', existing.id);
+      } else {
+        await supabase
+          .from('academy_course_update_requests')
+          .insert([{
+            student_id: studentId,
+            previous_course_id: previousCourseId,
+            new_course_id: newCourseId,
+            reason: request.reason || 'Atualização de curso',
+            status: 'concluido',
+            payment_status: 'pago',
+            admin_notes: notes || request.admin_notes,
+            reviewed_by: adminUserId,
+            reviewed_at: nowIso,
+            created_at: request.created_at || nowIso,
+            updated_at: nowIso
+          }]);
+      }
+    }
   } catch (_) {}
 
   // 5. Enviar Notificação Padrão Obrigatória de Inscrição Aprovada (Requisito 3)
@@ -2824,6 +2961,7 @@ export async function getStudents({ search = '', status = 'all', page = 1, limit
 
   const normalized = (data || []).map(s => parseStudentCivilData({
     ...s,
+    enrollments: deduplicateEnrollments(s.enrollments || []),
     student_code: s.student_code || s.student_number,
     student_number: s.student_number || s.student_code,
     enrollment_status: s.enrollment_status || s.status,
@@ -2852,6 +2990,7 @@ export async function getStudentById(id) {
 
   if (error) throw error;
   if (data) {
+    data.enrollments = deduplicateEnrollments(data.enrollments || []);
     data.student_code = data.student_code || data.student_number;
     data.student_number = data.student_number || data.student_code;
     data.enrollment_status = data.enrollment_status || data.status;
@@ -2977,11 +3116,11 @@ export async function getStudentByUserId(userId) {
               };
             });
 
-            std.enrollments = enrs.map(e => ({
+            std.enrollments = deduplicateEnrollments(enrs.map(e => ({
               ...e,
               course: cMap[e.course_id] || null,
               class: clMap[e.class_id] || null
-            }));
+            })));
           } else {
             std.enrollments = [];
           }
@@ -2999,6 +3138,9 @@ export async function getStudentByUserId(userId) {
 
   if (error) throw error;
   if (data) {
+    if (data.enrollments) {
+      data.enrollments = deduplicateEnrollments(data.enrollments);
+    }
     data.student_code = data.student_code || data.student_number;
     data.student_number = data.student_number || data.student_code;
     data.enrollment_status = data.enrollment_status || data.status;
