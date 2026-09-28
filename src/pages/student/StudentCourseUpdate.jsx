@@ -4,6 +4,7 @@ import { useAuth } from '../../context/AuthContext';
 import StudentSidebar from '../../components/student/StudentSidebar';
 import { 
   getCourses, 
+  getStudentEnrollments,
   getStudentCoursesEligibility, 
   requestStudentCourseUpdate,
   getStudentCourseUpdateRequests,
@@ -54,21 +55,38 @@ export default function StudentCourseUpdate() {
     return () => clearInterval(timer);
   }, []);
 
-  const activeEnrollment = student?.enrollments?.[0];
-  const currentCourse = activeEnrollment?.course;
-  const isCurrentCourseCompleted = activeEnrollment?.status === 'concluido' || 
-    (typeof activeEnrollment?.final_grade === 'string' && activeEnrollment?.final_grade.toUpperCase().includes('APROVADO'));
+  const [currentCourseData, setCurrentCourseData] = useState(null);
+  const [activeEnrollmentData, setActiveEnrollmentData] = useState(null);
+
+  const activeEnrollment = activeEnrollmentData || student?.enrollments?.[0];
+  const currentCourse = currentCourseData || activeEnrollment?.course;
 
   const loadData = async () => {
     if (!student?.id) return;
     setLoading(true);
     setErrorMsg('');
     try {
-      const [crs, elig, reqs] = await Promise.all([
+      // 1. Carregar matrículas atualizadas do estudante
+      const enrs = await getStudentEnrollments(student.id);
+      const activeEnr = (enrs || []).find(e => e.status === 'ativo') || 
+                        (enrs || []).find(e => e.status === 'concluido') || 
+                        (enrs || [])[0];
+      
+      setActiveEnrollmentData(activeEnr || null);
+      const activeCrs = activeEnr?.course || null;
+      if (activeCrs) {
+        setCurrentCourseData(activeCrs);
+      }
+
+      // 2. Carregar catálogo e mapa de elegibilidade passando currentCourseId
+      const [crs, reqs] = await Promise.all([
         getCourses(true),
-        getStudentCoursesEligibility(student.id),
         getStudentCourseUpdateRequests(student.id)
       ]);
+
+      const currentCourseId = activeCrs?.id || activeEnr?.course_id || null;
+      const elig = await getStudentCoursesEligibility(student.id, { currentCourseId });
+
       setCourses(crs || []);
       setEligibilityMap(elig || {});
       setRequestHistory(reqs || []);
@@ -107,11 +125,12 @@ export default function StudentCourseUpdate() {
     if (!selectedCourseId) {
       return setErrorMsg('Por favor, selecione o novo curso pretendido.');
     }
-    if (currentCourse?.id && selectedCourseId === currentCourse.id) {
+    const activeCrs = currentCourseData || currentCourse;
+    if (activeCrs?.id && selectedCourseId === activeCrs.id) {
       return setErrorMsg('O novo curso selecionado não pode ser igual ao seu curso atual.');
     }
 
-    if (activeRequest) {
+    if (activeRequest && ['pendente', 'em_analise', 'aprovada_aguardando_pagamento'].includes(activeRequest.status)) {
       return setErrorMsg('Já possui uma solicitação de atualização em andamento. Aguarde o parecer da Direção.');
     }
 
@@ -121,13 +140,17 @@ export default function StudentCourseUpdate() {
     try {
       const newReq = await requestStudentCourseUpdate({
         studentId: student.id,
-        previousCourseId: currentCourse?.id || null,
+        previousCourseId: activeCrs?.id || null,
         newCourseId: selectedCourseId,
         reason: reason.trim()
       });
 
       setActiveRequest(newReq);
       setJustSubmitted(true);
+      setSelectedCourseId('');
+      setReason('');
+
+      await loadData();
 
       if (refreshProfile) {
         await refreshProfile();
@@ -489,21 +512,20 @@ export default function StudentCourseUpdate() {
                 >
                   <option value="">-- Selecione o novo curso desejado --</option>
                   {courses.map(course => {
-                    const isCurrent = currentCourse?.id === course.id;
+                    const activeCrs = currentCourseData || currentCourse;
+                    const isCurrent = activeCrs?.id === course.id;
                     const elig = eligibilityMap[course.id];
-                    const isBlocked = elig && !elig.eligible;
-                    const isReproved = elig && elig.canReEnrollReproved;
+                    const isCompleted = elig?.isCompleted || false;
 
                     let labelExtra = '';
                     if (isCurrent) labelExtra = ' [CURSO ATUAL]';
-                    else if (isBlocked) labelExtra = ' [CONCLUÍDO & CERTIFICADO - BLOQUEADO]';
-                    else if (isReproved) labelExtra = ' [REPROVAÇÃO PRÉVIA - MATRÍCULA PERMITIDA]';
+                    else if (isCompleted) labelExtra = ' [CONCLUÍDO & CERTIFICADO - BLOQUEADO]';
 
                     return (
                       <option
                         key={course.id}
                         value={course.id}
-                        disabled={isCurrent || isBlocked}
+                        disabled={isCurrent || isCompleted}
                       >
                         {course.title} ({formatCurrency(course.price)}) {labelExtra}
                       </option>

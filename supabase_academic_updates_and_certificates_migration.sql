@@ -46,12 +46,10 @@ ALTER TABLE public.academy_course_update_requests ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "Authenticated users manage course update requests" ON public.academy_course_update_requests;
 DROP POLICY IF EXISTS "Public read course update requests" ON public.academy_course_update_requests;
+DROP POLICY IF EXISTS "Allow all on academy_course_update_requests" ON public.academy_course_update_requests;
 
-CREATE POLICY "Authenticated users manage course update requests" ON public.academy_course_update_requests
-  FOR ALL TO authenticated USING (true) WITH CHECK (true);
-
-CREATE POLICY "Public read course update requests" ON public.academy_course_update_requests
-  FOR SELECT TO anon USING (true);
+CREATE POLICY "Allow all on academy_course_update_requests" ON public.academy_course_update_requests
+  FOR ALL USING (true) WITH CHECK (true);
 
 
 -- ------------------------------------------------------------------------------
@@ -86,12 +84,10 @@ ALTER TABLE public.academy_certificate_requests ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "Authenticated users manage certificate requests" ON public.academy_certificate_requests;
 DROP POLICY IF EXISTS "Public read certificate requests" ON public.academy_certificate_requests;
+DROP POLICY IF EXISTS "Allow all on academy_certificate_requests" ON public.academy_certificate_requests;
 
-CREATE POLICY "Authenticated users manage certificate requests" ON public.academy_certificate_requests
-  FOR ALL TO authenticated USING (true) WITH CHECK (true);
-
-CREATE POLICY "Public read certificate requests" ON public.academy_certificate_requests
-  FOR SELECT TO anon USING (true);
+CREATE POLICY "Allow all on academy_certificate_requests" ON public.academy_certificate_requests
+  FOR ALL USING (true) WITH CHECK (true);
 
 
 -- ------------------------------------------------------------------------------
@@ -115,12 +111,11 @@ CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON public.academy_notifi
 ALTER TABLE public.academy_notifications ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "Authenticated users manage notifications" ON public.academy_notifications;
-CREATE POLICY "Authenticated users manage notifications" ON public.academy_notifications
-  FOR ALL TO authenticated USING (true) WITH CHECK (true);
-
 DROP POLICY IF EXISTS "Public read notifications" ON public.academy_notifications;
-CREATE POLICY "Public read notifications" ON public.academy_notifications
-  FOR SELECT TO anon USING (true);
+DROP POLICY IF EXISTS "Allow all on academy_notifications" ON public.academy_notifications;
+
+CREATE POLICY "Allow all on academy_notifications" ON public.academy_notifications
+  FOR ALL USING (true) WITH CHECK (true);
 
 
 -- ------------------------------------------------------------------------------

@@ -1578,7 +1578,7 @@ export async function checkStudentDuplicates({ phone, email, idDocumentNumber })
  * 2. Se o estudante for REPROVADO no curso X, permite nova matrícula no curso X sob regras normais.
  * 3. Se possui matrícula ativa/pendente em andamento no curso X, proíbe duplicidade em andamento.
  */
-export async function checkStudentCourseEnrollmentEligibility(studentId, courseId) {
+export async function checkStudentCourseEnrollmentEligibility(studentId, courseId, { isCourseUpdate = false } = {}) {
   if (!studentId || !courseId) {
     return { eligible: true };
   }
@@ -1595,8 +1595,9 @@ export async function checkStudentCourseEnrollmentEligibility(studentId, courseI
     if (certs && certs.length > 0) {
       return {
         eligible: false,
+        isCompleted: true,
         reason: 'curso_concluido_com_certificado',
-        message: 'Este curso já foi concluído. O seu certificado foi emitido. Para continuar os seus estudos, solicite uma nova matrícula noutro curso ou atualize o seu percurso académico.'
+        message: 'Este curso já foi concluído e certificado. Selecione outro curso disponível.'
       };
     }
   } catch (cErr) {
@@ -1615,7 +1616,7 @@ export async function checkStudentCourseEnrollmentEligibility(studentId, courseI
     if (enrollments && enrollments.length > 0) {
       const courseTitle = enrollments[0].course?.title || 'este curso';
 
-      // A) Se possui matrícula concluída ou com menção de APROVADO
+      // A) Se possui matrícula concluída ou com menção de APROVADO: BLOQUEIA
       const hasApproved = enrollments.some(e => 
         e.status === 'concluido' || 
         (typeof e.final_grade === 'string' && e.final_grade.toUpperCase().includes('APROVADO'))
@@ -1624,67 +1625,124 @@ export async function checkStudentCourseEnrollmentEligibility(studentId, courseI
       if (hasApproved) {
         return {
           eligible: false,
+          isCompleted: true,
           reason: 'curso_concluido_aprovado',
-          message: `O estudante já concluiu ${courseTitle} com aprovação. O seu certificado foi emitido ou está disponível. Apenas é permitida a inscrição em outros cursos disponíveis.`
+          message: `O estudante já concluiu ${courseTitle} com aproveitamento. Apenas é permitida a inscrição em outros cursos disponíveis.`
         };
       }
 
-      // B) Se possui matrícula ativa ou pendente em andamento (não reprovado nem cancelado)
-      const hasActiveOrPending = enrollments.some(e => 
-        ['ativo', 'pendente', 'em_curso'].includes(e.status) &&
-        !(typeof e.final_grade === 'string' && e.final_grade.toUpperCase().includes('REPROVADO'))
-      );
+      // B) Para fluxo de inscrição externa comum (NÃO para atualização de curso):
+      // Verifica se possui matrícula ativa
+      if (!isCourseUpdate) {
+        const hasActive = enrollments.some(e => 
+          ['ativo', 'em_curso'].includes(e.status) &&
+          !(typeof e.final_grade === 'string' && e.final_grade.toUpperCase().includes('REPROVADO'))
+        );
 
-      if (hasActiveOrPending) {
-        return {
-          eligible: false,
-          reason: 'matricula_em_andamento',
-          message: `Você já possui uma matrícula ativa ou em análise para ${courseTitle}. Acompanhe o estado no seu painel.`
-        };
-      }
-
-      // C) Se o estudante teve histórico com REPROVADO (status === 'reprovado' ou final_grade com REPROVADO):
-      const isReproved = enrollments.some(e => 
-        e.status === 'reprovado' || 
-        (typeof e.final_grade === 'string' && e.final_grade.toUpperCase().includes('REPROVADO'))
-      );
-
-      if (isReproved) {
-        // PERMITIDO RE-MATRICULAR!
-        return {
-          eligible: true,
-          canReEnrollReproved: true,
-          previousEnrollmentId: enrollments[0].id,
-          message: `Estudante com histórico de reprovação prévia em ${courseTitle}. Nova matrícula permitida sob regras normais.`
-        };
+        if (hasActive) {
+          return {
+            eligible: false,
+            reason: 'matricula_em_andamento',
+            message: `Você já possui uma matrícula ativa para ${courseTitle}.`
+          };
+        }
       }
     }
   } catch (eErr) {
     console.warn('Aviso ao consultar matrículas para elegibilidade:', eErr);
   }
 
-  return { eligible: true };
+  return { eligible: true, isCompleted: false };
+}
+
+/**
+ * Obtém todas as matrículas de um estudante com dados do curso e turma
+ */
+export async function getStudentEnrollments(studentId) {
+  if (!studentId) return [];
+  try {
+    const { data, error } = await supabase
+      .from('academy_enrollments')
+      .select(`
+        *,
+        course:academy_courses (*),
+        class:academy_classes (*)
+      `)
+      .eq('student_id', studentId)
+      .order('created_at', { ascending: false });
+
+    if (!error && data) return data;
+  } catch (err) {
+    console.warn('Aviso ao obter matrículas do estudante:', err);
+  }
+  return [];
 }
 
 /**
  * Retorna o mapa de elegibilidade do estudante para todos os cursos activos
+ * Bloqueia APENAS o curso já concluído e opcionalmente o curso atual.
+ * Todos os restantes cursos do catálogo ficam 100% elegíveis para seleção.
  */
-export async function getStudentCoursesEligibility(studentId) {
+export async function getStudentCoursesEligibility(studentId, { currentCourseId = null } = {}) {
   if (!studentId) return {};
   try {
     const { data: courses } = await supabase
       .from('academy_courses')
-      .select('id, title, is_active')
+      .select('id, title, is_active, price, workload_hours')
       .eq('is_active', true);
+
+    // 1. Obter certificados válidos do aluno
+    const { data: certs } = await supabase
+      .from('academy_certificates')
+      .select('course_id, status')
+      .eq('student_id', studentId)
+      .neq('status', 'revogado');
+
+    const completedFromCert = new Set((certs || []).map(c => c.course_id));
+
+    // 2. Obter matrículas do aluno
+    const { data: enrollments } = await supabase
+      .from('academy_enrollments')
+      .select('id, course_id, status, final_grade')
+      .eq('student_id', studentId);
+
+    const completedFromEnr = new Set(
+      (enrollments || [])
+        .filter(e => e.status === 'concluido' || (typeof e.final_grade === 'string' && e.final_grade.toUpperCase().includes('APROVADO')))
+        .map(e => e.course_id)
+    );
 
     const map = {};
     if (courses && courses.length > 0) {
-      await Promise.all(
-        courses.map(async (c) => {
-          const res = await checkStudentCourseEnrollmentEligibility(studentId, c.id);
-          map[c.id] = res;
-        })
-      );
+      courses.forEach(c => {
+        const isCompleted = completedFromCert.has(c.id) || completedFromEnr.has(c.id);
+        const isCurrent = currentCourseId && currentCourseId === c.id;
+
+        if (isCompleted) {
+          map[c.id] = {
+            eligible: false,
+            isCompleted: true,
+            isCurrent: false,
+            reason: 'curso_concluido_com_certificado',
+            message: 'Curso já concluído com certificado emitido.'
+          };
+        } else if (isCurrent) {
+          map[c.id] = {
+            eligible: false,
+            isCompleted: false,
+            isCurrent: true,
+            reason: 'curso_atual',
+            message: 'Curso atualmente ativo.'
+          };
+        } else {
+          map[c.id] = {
+            eligible: true,
+            isCompleted: false,
+            isCurrent: false,
+            message: 'Disponível para seleção'
+          };
+        }
+      });
     }
     return map;
   } catch (err) {
@@ -1841,7 +1899,7 @@ export async function requestStudentCourseUpdate({
   const previousCourse = prevCourseRes.data || { id: previousCourseId, title: 'Curso Anterior' };
 
   // 3. Validação de elegibilidade: curso concluído não pode ser selecionado
-  const eligibility = await checkStudentCourseEnrollmentEligibility(studentId, newCourseId);
+  const eligibility = await checkStudentCourseEnrollmentEligibility(studentId, newCourseId, { isCourseUpdate: true });
   if (!eligibility.eligible) {
     throw new Error(eligibility.message);
   }
@@ -1878,14 +1936,28 @@ export async function requestStudentCourseUpdate({
     updated_at: nowIso
   };
 
-  // 4. Inserir matrícula preliminar em estado 'pendente' no academy_enrollments
+  // 4. Inserir ou atualizar matrícula preliminar em estado 'pendente' no academy_enrollments
   try {
-    await supabase.from('academy_enrollments').insert([{
-      student_id: studentId,
-      course_id: newCourseId,
-      class_id: null,
-      status: 'pendente'
-    }]);
+    const { data: existingEnr } = await supabase
+      .from('academy_enrollments')
+      .select('id')
+      .eq('student_id', studentId)
+      .eq('course_id', newCourseId)
+      .maybeSingle();
+
+    if (existingEnr?.id) {
+      await supabase
+        .from('academy_enrollments')
+        .update({ status: 'pendente', updated_at: nowIso })
+        .eq('id', existingEnr.id);
+    } else {
+      await supabase.from('academy_enrollments').insert([{
+        student_id: studentId,
+        course_id: newCourseId,
+        class_id: null,
+        status: 'pendente'
+      }]);
+    }
   } catch (_) {}
 
   // 4.1 Persistir primariamente na tabela oficial academy_course_update_requests (se criada no Supabase)
@@ -2015,6 +2087,79 @@ export async function getCourseUpdateRequests(filters = {}) {
     }
   } catch (err) {
     console.warn('Aviso ao consultar academy_course_update_requests no Supabase:', err?.message);
+  }
+
+  // 1.5 Carregar matrículas pendentes em academy_enrollments (para garantir visibilidade total cross-device)
+  try {
+    const { data: pendingEnrs } = await supabase
+      .from('academy_enrollments')
+      .select(`
+        id,
+        student_id,
+        course_id,
+        status,
+        created_at,
+        updated_at,
+        student:academy_students (id, full_name, student_code, student_number, email, phone),
+        course:academy_courses (id, title, price, workload_hours, duration)
+      `)
+      .eq('status', 'pendente')
+      .order('created_at', { ascending: false });
+
+    if (pendingEnrs && pendingEnrs.length > 0) {
+      // Obter cursos anteriores (ativos/concluídos) dos estudantes em lote
+      const studentIds = [...new Set(pendingEnrs.map(e => e.student_id))];
+      let priorCourseMap = new Map();
+      try {
+        const { data: priorEnrs } = await supabase
+          .from('academy_enrollments')
+          .select('student_id, course:academy_courses(id, title), status')
+          .in('student_id', studentIds)
+          .in('status', ['ativo', 'concluido']);
+
+        (priorEnrs || []).forEach(p => {
+          if (p.course && !priorCourseMap.has(p.student_id)) {
+            priorCourseMap.set(p.student_id, p.course);
+          }
+        });
+      } catch (_) {}
+
+      pendingEnrs.forEach(enr => {
+        const alreadyExists = Array.from(map.values()).some(
+          r => r.student_id === enr.student_id && ['pendente', 'em_analise', 'aprovada_aguardando_pagamento'].includes(r.status)
+        );
+
+        if (!alreadyExists) {
+          const priorCourse = priorCourseMap.get(enr.student_id);
+          const id = `enr_${enr.id}`;
+          map.set(id, {
+            id,
+            enrollment_id: enr.id,
+            student_id: enr.student_id,
+            student_name: enr.student?.full_name || 'Estudante',
+            student_code: enr.student?.student_code || enr.student?.student_number || 'ZA',
+            student_email: enr.student?.email,
+            student_phone: enr.student?.phone,
+            previous_course_id: priorCourse?.id || null,
+            previous_course_title: priorCourse?.title || 'Formação Anterior',
+            new_course_id: enr.course_id,
+            new_course_title: enr.course?.title || 'Novo Curso',
+            new_course_price: enr.course?.price || 0,
+            new_course_workload: enr.course?.workload_hours || 60,
+            new_course_duration: enr.course?.duration || '3 Meses',
+            reason: 'Solicitação de atualização de formação',
+            status: 'pendente',
+            admin_notes: null,
+            rejection_reason: null,
+            payment_status: (enr.course?.price > 0) ? 'pendente' : 'isento',
+            created_at: enr.created_at,
+            updated_at: enr.updated_at || enr.created_at
+          });
+        }
+      });
+    }
+  } catch (enrErr) {
+    console.warn('Aviso ao consultar matrículas pendentes para solicitações de curso:', enrErr?.message);
   }
 
   // 2. Carregar da store local resiliente
