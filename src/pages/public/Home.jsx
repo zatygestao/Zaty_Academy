@@ -62,11 +62,14 @@ export default function Home() {
   const inst = settings.institution || {};
 
   return (
-    <div>
+    <div className="home-page-wrapper">
       <SEO 
         title="Centro de Formação em Informática e Tecnologia" 
         description="Centro de Formação Profissional de Informática e Tecnologia em Namicopo, Nampula. Inscrições abertas para cursos práticos de alta qualificação com certificação validada por QR Code."
       />
+
+      {/* Camada de Textura de Fundo Exclusiva da Página Inicial (fiel à referência) */}
+      <div className="home-background-texture" aria-hidden="true" />
 
       {/* =========================================================
           HERO SECTION DE ÚLTIMA GERAÇÃO
