@@ -15,6 +15,7 @@ import {
   ShieldCheck, 
   Copy, 
   Check,
+  CheckCircle2,
   Eye,
   Printer,
   Calendar,

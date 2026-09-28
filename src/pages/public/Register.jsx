@@ -1200,11 +1200,21 @@ export default function Register() {
                   required
                 >
                   <option value="">-- Escolha um Curso --</option>
-                  {courses.map(c => (
-                    <option key={c.id} value={c.id}>
-                      {c.title} — {formatCurrency(c.price)}
-                    </option>
-                  ))}
+                  {courses.map(c => {
+                    const elig = eligibilityMap[c.id];
+                    const isBlocked = elig && !elig.eligible;
+                    const isReproved = elig && elig.canReEnrollReproved;
+                    return (
+                      <option 
+                        key={c.id} 
+                        value={c.id}
+                        disabled={isBlocked}
+                      >
+                        {c.title} — {formatCurrency(c.price)}
+                        {isBlocked ? ' — [CONCLUÍDO & CERTIFICADO - BLOQUEADO]' : isReproved ? ' — [REPROVAÇÃO PRÉVIA - MATRÍCULA PERMITIDA]' : ''}
+                      </option>
+                    );
+                  })}
                 </select>
               )}
             </div>

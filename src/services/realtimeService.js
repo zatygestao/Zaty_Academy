@@ -170,13 +170,23 @@ export function subscribeToContactMessages(onContactChange) {
   });
 }
 
+let systemBroadcastChannel = null;
+
+function getSystemBroadcastChannel() {
+  if (!systemBroadcastChannel) {
+    systemBroadcastChannel = supabase.channel('academy_system_broadcasts');
+    systemBroadcastChannel.subscribe();
+  }
+  return systemBroadcastChannel;
+}
+
 /**
- * Notifica a administração em tempo real sobre atualizações de curso realizadas por estudantes
+ * Notifica em tempo real sobre atualizações de curso realizadas por estudantes
  */
 export function broadcastCourseUpdate(data) {
   try {
-    const channel = supabase.channel('academy_system_broadcasts');
-    channel.send({
+    const ch = getSystemBroadcastChannel();
+    ch.send({
       type: 'broadcast',
       event: 'student_course_updated',
       payload: data
@@ -184,33 +194,42 @@ export function broadcastCourseUpdate(data) {
   } catch (err) {
     console.warn('[Realtime] Falha no broadcast de atualização de curso:', err);
   }
+
+  // Notificação local imediata para mesma janela/sessão
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('zaty_course_update', { detail: data }));
+  }
 }
 
 /**
- * Escuta em tempo real atualizações de curso de estudantes (canal dedicado para administração)
+ * Escuta em tempo real atualizações de curso de estudantes
  */
 export function subscribeToCourseUpdates(onCourseUpdate) {
-  // 1. Escuta via broadcast de alta velocidade
-  const topic = `realtime_course_updates_${Date.now()}`;
-  const broadcastChannel = supabase.channel(topic);
+  const ch = getSystemBroadcastChannel();
   
-  broadcastChannel.on('broadcast', { event: 'student_course_updated' }, (payload) => {
+  const handleBroadcast = (payload) => {
     try {
       if (onCourseUpdate && payload?.payload) onCourseUpdate(payload.payload);
     } catch (e) {
       console.warn('[Realtime] Erro ao processar broadcast de curso:', e);
     }
-  });
-  
-  broadcastChannel.subscribe();
-  activeChannels.set(topic, broadcastChannel);
+  };
 
-  // 2. Escuta complementar via Postgres changes na tabela de auditoria
+  ch.on('broadcast', { event: 'student_course_updated' }, handleBroadcast);
+
+  const localListener = (e) => {
+    if (onCourseUpdate && e?.detail) onCourseUpdate(e.detail);
+  };
+  if (typeof window !== 'undefined') {
+    window.addEventListener('zaty_course_update', localListener);
+  }
+
+  // Escuta complementar via Postgres changes na tabela de auditoria
   const auditSub = subscribeToTable({
     table: 'academy_audit_logs',
     event: 'INSERT',
     onInsert: (newLog) => {
-      if (newLog.action === 'STUDENT_COURSE_UPDATED' || newLog.resource_type === 'course_update') {
+      if (newLog.action === 'STUDENT_COURSE_UPDATED' || newLog.action === 'COURSE_UPDATE_REQUESTED' || newLog.resource_type === 'course_update') {
         if (onCourseUpdate) onCourseUpdate(newLog.details || newLog);
       }
     }
@@ -219,11 +238,124 @@ export function subscribeToCourseUpdates(onCourseUpdate) {
   return {
     unsubscribe: () => {
       try {
-        if (activeChannels.has(topic)) {
-          activeChannels.delete(topic);
-          supabase.removeChannel(broadcastChannel);
+        if (typeof window !== 'undefined') {
+          window.removeEventListener('zaty_course_update', localListener);
         }
         if (auditSub?.unsubscribe) auditSub.unsubscribe();
+      } catch (_) {}
+    }
+  };
+}
+
+/**
+ * Transmite em tempo real alterações nos requerimentos de certificados
+ */
+export function broadcastCertificateRequest(data) {
+  try {
+    const ch = getSystemBroadcastChannel();
+    ch.send({
+      type: 'broadcast',
+      event: 'certificate_request_event',
+      payload: data
+    });
+  } catch (err) {
+    console.warn('[Realtime] Falha no broadcast de requerimento de certificado:', err);
+  }
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('zaty_certificate_request', { detail: data }));
+  }
+}
+
+/**
+ * Escuta em tempo real alterações nos requerimentos de certificados
+ */
+export function subscribeToCertificateRequests(onCertRequest) {
+  const ch = getSystemBroadcastChannel();
+
+  const handleBroadcast = (payload) => {
+    try {
+      if (onCertRequest && payload?.payload) onCertRequest(payload.payload);
+    } catch (e) {
+      console.warn('[Realtime] Erro ao processar broadcast de certificado:', e);
+    }
+  };
+
+  ch.on('broadcast', { event: 'certificate_request_event' }, handleBroadcast);
+
+  const localListener = (e) => {
+    if (onCertRequest && e?.detail) onCertRequest(e.detail);
+  };
+  if (typeof window !== 'undefined') {
+    window.addEventListener('zaty_certificate_request', localListener);
+  }
+
+  return {
+    unsubscribe: () => {
+      try {
+        if (typeof window !== 'undefined') {
+          window.removeEventListener('zaty_certificate_request', localListener);
+        }
+      } catch (_) {}
+    }
+  };
+}
+
+/**
+ * Transmite notificações em tempo real para o sino e painéis
+ */
+export function broadcastNotificationEvent(data) {
+  try {
+    const ch = getSystemBroadcastChannel();
+    ch.send({
+      type: 'broadcast',
+      event: 'system_notification',
+      payload: data
+    });
+  } catch (err) {}
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('zaty_new_notification', { detail: data }));
+  }
+}
+
+/**
+ * Escuta notificações globais em tempo real para o sino
+ */
+export function subscribeToGlobalNotifications(onNotification) {
+  const ch = getSystemBroadcastChannel();
+
+  const handleBroadcast = (payload) => {
+    try {
+      if (onNotification && payload?.payload) onNotification(payload.payload);
+    } catch (e) {}
+  };
+
+  ch.on('broadcast', { event: 'system_notification' }, handleBroadcast);
+
+  const localListener = (e) => {
+    if (onNotification && e?.detail) onNotification(e.detail);
+  };
+  if (typeof window !== 'undefined') {
+    window.addEventListener('zaty_new_notification', localListener);
+  }
+
+  // Também escuta na tabela academy_notifications
+  const notifSub = subscribeToTable({
+    table: 'academy_notifications',
+    event: 'INSERT',
+    onInsert: (newNotif) => {
+      if (onNotification) onNotification(newNotif);
+    }
+  });
+
+  return {
+    unsubscribe: () => {
+      try {
+        if (typeof window !== 'undefined') {
+          window.removeEventListener('zaty_new_notification', localListener);
+        }
+        if (notifSub?.unsubscribe) notifSub.unsubscribe();
       } catch (_) {}
     }
   };

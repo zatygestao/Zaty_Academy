@@ -19,7 +19,8 @@ import {
   Globe,
   Newspaper,
   Headphones,
-  FileCheck
+  FileCheck,
+  RotateCcw
 } from 'lucide-react';
 
 export default function AdminSidebar() {
@@ -55,6 +56,7 @@ export default function AdminSidebar() {
       items: [
         { label: 'Estudantes', path: '/admin/estudantes', roles: ['super_admin', 'admin', 'secretaria'], icon: Users },
         { label: 'Cursos & aulas', path: '/admin/cursos', roles: ['super_admin', 'admin'], icon: BookOpen },
+        { label: 'Atualizações de Curso', path: '/admin/solicitacoes-curso', roles: ['super_admin', 'admin', 'secretaria'], icon: RotateCcw },
         { label: 'Turmas', path: '/admin/turmas', roles: ['super_admin', 'admin', 'secretaria'], icon: Calendar },
         { label: 'Notas & Pautas', path: '/admin/notas', roles: ['super_admin', 'admin', 'secretaria'], icon: FileCheck },
         { label: 'Formadores', path: '/admin/formadores', roles: ['super_admin', 'admin'], icon: GraduationCap },

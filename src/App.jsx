@@ -61,6 +61,7 @@ const ArticlesManagement = lazy(() => import('./pages/admin/ArticlesManagement')
 const SupportManagement = lazy(() => import('./pages/admin/SupportManagement'));
 const SettingsManagement = lazy(() => import('./pages/admin/SettingsManagement'));
 const AuditLogsManagement = lazy(() => import('./pages/admin/AuditLogsManagement'));
+const CourseUpdateRequests = lazy(() => import('./pages/admin/CourseUpdateRequests'));
 
 import ZatyLoadingScreen from './components/common/ZatyLoadingScreen';
 
@@ -302,6 +303,14 @@ export default function App() {
                     element={
                       <ProtectedRoute allowedRoles={['super_admin', 'admin', 'secretaria']}>
                         <CoursesManagement />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/admin/solicitacoes-curso"
+                    element={
+                      <ProtectedRoute allowedRoles={['super_admin', 'admin', 'secretaria']}>
+                        <CourseUpdateRequests />
                       </ProtectedRoute>
                     }
                   />

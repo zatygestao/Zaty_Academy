@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import BrandLogo from './BrandLogo';
+import NotificationBell from './NotificationBell';
 import { 
   GraduationCap, 
   X, 
@@ -271,6 +272,8 @@ export default function Navbar() {
         <div style={{ display: 'none', alignItems: 'center', gap: '0.75rem', flexShrink: 0 }} className="desktop-nav">
           {user ? (
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+              <NotificationBell />
+
               <Link 
                 to={panelRoute} 
                 className="btn btn-primary btn-sm" 
@@ -316,6 +319,7 @@ export default function Navbar() {
         <div className="mobile-actions" style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexShrink: 0 }}>
           {user ? (
             <>
+              <NotificationBell />
               {/* Profile Pill Executivo Mobile */}
               <Link 
                 to={panelRoute}
