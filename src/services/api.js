@@ -1847,7 +1847,8 @@ export async function requestStudentCourseUpdate({
   }
 
   const nowIso = new Date().toISOString();
-  const reqId = `cur_${Date.now()}_${Math.random().toString(36).substr(2, 8)}`;
+  const isUuid = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function';
+  const reqId = isUuid ? crypto.randomUUID() : `cur_${Date.now()}_${Math.random().toString(36).substr(2, 8)}`;
   const studentCode = student.student_code || student.student_number || 'ZA';
   const studentName = student.full_name;
 
@@ -1887,9 +1888,33 @@ export async function requestStudentCourseUpdate({
     }]);
   } catch (_) {}
 
+  // 4.1 Persistir primariamente na tabela oficial academy_course_update_requests (se criada no Supabase)
+  try {
+    const payload = {
+      student_id: studentId,
+      previous_course_id: previousCourse.id || null,
+      new_course_id: newCourse.id,
+      reason: newRequest.reason,
+      status: newRequest.status,
+      payment_status: newRequest.payment_status
+    };
+    if (isUuid) payload.id = reqId;
+    const { data: dbData, error: dbErr } = await supabase
+      .from('academy_course_update_requests')
+      .insert([payload])
+      .select('id')
+      .maybeSingle();
+
+    if (!dbErr && dbData?.id) {
+      newRequest.id = dbData.id;
+    }
+  } catch (dbErr) {
+    console.warn('Aviso: Fallback local para academy_course_update_requests:', dbErr?.message);
+  }
+
   // 5. Salvar na store local resiliente
   const localStore = getLocalCourseUpdateRequestsStore();
-  const updatedLocal = [newRequest, ...localStore.filter(r => r.id !== reqId)];
+  const updatedLocal = [newRequest, ...localStore.filter(r => r.id !== newRequest.id && r.id !== reqId)];
   saveLocalCourseUpdateRequestsStore(updatedLocal);
 
   // 6. Registar no log de auditoria oficial
@@ -1947,10 +1972,59 @@ export async function getCourseUpdateRequests(filters = {}) {
   const localList = getLocalCourseUpdateRequestsStore();
   const map = new Map();
 
-  // 1. Carregar da store local
-  localList.forEach(r => map.set(r.id, r));
+  // 1. Carregar da tabela oficial no Supabase (se criada)
+  try {
+    const { data: dbRequests, error: dbErr } = await supabase
+      .from('academy_course_update_requests')
+      .select(`
+        *,
+        student:academy_students (id, full_name, student_code, student_number, email, phone),
+        previous_course:academy_courses!previous_course_id (id, title),
+        new_course:academy_courses!new_course_id (id, title, price, workload_hours, duration)
+      `)
+      .order('created_at', { ascending: false });
 
-  // 2. Carregar registos históricos da tabela de auditoria
+    if (!dbErr && dbRequests && dbRequests.length > 0) {
+      dbRequests.forEach(r => {
+        map.set(r.id, {
+          id: r.id,
+          student_id: r.student_id,
+          student_name: r.student?.full_name || 'Estudante',
+          student_code: r.student?.student_code || r.student?.student_number || 'ZA',
+          student_email: r.student?.email,
+          student_phone: r.student?.phone,
+          previous_course_id: r.previous_course_id,
+          previous_course_title: r.previous_course?.title || 'Curso Anterior',
+          new_course_id: r.new_course_id,
+          new_course_title: r.new_course?.title || 'Novo Curso',
+          new_course_price: r.new_course?.price || 0,
+          new_course_workload: r.new_course?.workload_hours || 60,
+          new_course_duration: r.new_course?.duration || '3 Meses',
+          reason: r.reason || 'Atualização de curso',
+          status: r.status,
+          admin_notes: r.admin_notes,
+          rejection_reason: r.rejection_reason,
+          payment_status: r.payment_status,
+          payment_id: r.payment_id,
+          reviewed_by: r.reviewed_by,
+          reviewed_at: r.reviewed_at,
+          created_at: r.created_at,
+          updated_at: r.updated_at
+        });
+      });
+    }
+  } catch (err) {
+    console.warn('Aviso ao consultar academy_course_update_requests no Supabase:', err?.message);
+  }
+
+  // 2. Carregar da store local resiliente
+  localList.forEach(r => {
+    if (!map.has(r.id)) {
+      map.set(r.id, r);
+    }
+  });
+
+  // 3. Carregar registos históricos da tabela de auditoria
   try {
     const { data: auditLogs } = await supabase
       .from('academy_audit_logs')
@@ -2104,6 +2178,22 @@ export async function reviewCourseUpdateRequest({
   }
   saveLocalCourseUpdateRequestsStore(updatedLocal);
 
+  // Atualizar na base de dados Supabase (se criada)
+  try {
+    await supabase
+      .from('academy_course_update_requests')
+      .update({
+        status: newStatus,
+        payment_status: newPaymentStatus,
+        admin_notes: adminNotes ? adminNotes.trim() : request.admin_notes,
+        rejection_reason: rejectionReason ? rejectionReason.trim() : request.rejection_reason,
+        reviewed_by: adminUserId,
+        reviewed_at: nowIso,
+        updated_at: nowIso
+      })
+      .eq('id', requestId);
+  } catch (_) {}
+
   // Notificar o estudante
   try {
     if (newStatus === 'aprovada_aguardando_pagamento') {
@@ -2243,6 +2333,21 @@ export async function confirmCourseUpdatePaymentAndActivate({
   const updatedLocal = localStore.map(r => r.id === requestId ? updatedReq : r);
   if (!updatedLocal.some(r => r.id === requestId)) updatedLocal.unshift(updatedReq);
   saveLocalCourseUpdateRequestsStore(updatedLocal);
+
+  // Atualizar na base de dados Supabase (se criada)
+  try {
+    await supabase
+      .from('academy_course_update_requests')
+      .update({
+        status: 'concluido',
+        payment_status: 'pago',
+        admin_notes: notes || request.admin_notes,
+        reviewed_by: adminUserId,
+        reviewed_at: nowIso,
+        updated_at: nowIso
+      })
+      .eq('id', requestId);
+  } catch (_) {}
 
   // 5. Enviar Notificação Padrão Obrigatória de Inscrição Aprovada (Requisito 3)
   const approvedNotif = {
