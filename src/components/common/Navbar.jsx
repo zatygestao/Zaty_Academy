@@ -16,7 +16,8 @@ import {
   Phone,
   Info,
   HelpCircle,
-  Home
+  Home,
+  Sparkles
 } from 'lucide-react';
 
 function StaggeredHamburgerIcon() {
@@ -397,7 +398,7 @@ export default function Navbar() {
 
       {/* =========================================================================
           MENU HAMBÚRGUER DA PÁGINA INICIAL / PÚBLICO (EXCLUSIVO PARA PÁGINAS PÚBLICAS)
-          Apresenta APENAS páginas e opções externas/públicas, perfeitamente restaurado.
+          Apresenta APENAS páginas e opções externas/públicas, perfeitamente organizado.
           ========================================================================= */}
       {!isInternal && mobileMenuOpen && (
         <>
@@ -412,160 +413,214 @@ export default function Navbar() {
             className="public-mobile-dropdown"
             aria-label="Menu de Navegação da Página Inicial"
           >
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-              <Link 
-                to="/" 
-                onClick={() => setMobileMenuOpen(false)}
-                className={`public-nav-item ${isActive('/') && location.pathname === '/' ? 'active' : ''}`}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                  <Home size={18} color={isActive('/') && location.pathname === '/' ? '#00C7FD' : '#94A3B8'} />
-                  <span>Página Inicial</span>
-                </div>
-                {isActive('/') && location.pathname === '/' && <span className="active-dot" />}
-              </Link>
-
-              <Link 
-                to="/cursos" 
-                onClick={() => setMobileMenuOpen(false)}
-                className={`public-nav-item ${isActive('/cursos') ? 'active' : ''}`}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                  <BookOpen size={18} color={isActive('/cursos') ? '#00C7FD' : '#94A3B8'} />
-                  <span>Nossos Cursos</span>
-                </div>
-                {isActive('/cursos') && <span className="active-dot" />}
-              </Link>
-
-              <Link 
-                to="/inscricao" 
-                onClick={() => setMobileMenuOpen(false)}
-                className={`public-nav-item ${isActive('/inscricao') ? 'active' : ''}`}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                  <UserPlus size={18} color={isActive('/inscricao') ? '#00C7FD' : '#94A3B8'} />
-                  <span>Inscrição Online</span>
-                </div>
-                <span className="public-badge-open">Aberto</span>
-              </Link>
-
-              <Link 
-                to="/noticias" 
-                onClick={() => setMobileMenuOpen(false)}
-                className={`public-nav-item ${isActive('/noticias') || isActive('/artigos') ? 'active' : ''}`}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                  <Newspaper size={18} color={isActive('/noticias') || isActive('/artigos') ? '#00C7FD' : '#94A3B8'} />
-                  <span>Notícias & Comunicados</span>
-                </div>
-                {(isActive('/noticias') || isActive('/artigos')) && <span className="active-dot" />}
-              </Link>
-
-              <Link 
-                to="/sobre" 
-                onClick={() => setMobileMenuOpen(false)}
-                className={`public-nav-item ${isActive('/sobre') ? 'active' : ''}`}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                  <Info size={18} color={isActive('/sobre') ? '#00C7FD' : '#94A3B8'} />
-                  <span>Sobre a Instituição</span>
-                </div>
-                {isActive('/sobre') && <span className="active-dot" />}
-              </Link>
-
-              <Link 
-                to="/validar" 
-                onClick={() => setMobileMenuOpen(false)}
-                className={`public-nav-item ${isActive('/validar') ? 'active' : ''}`}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                  <CheckCircle2 size={18} color={isActive('/validar') ? '#00C7FD' : '#94A3B8'} />
-                  <span>Validar Certificado</span>
-                </div>
-                {isActive('/validar') && <span className="active-dot" />}
-              </Link>
-
-              <Link 
-                to="/contactos" 
-                onClick={() => setMobileMenuOpen(false)}
-                className={`public-nav-item ${isActive('/contactos') ? 'active' : ''}`}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                  <Phone size={18} color={isActive('/contactos') ? '#00C7FD' : '#94A3B8'} />
-                  <span>Contactos & Localização</span>
-                </div>
-                {isActive('/contactos') && <span className="active-dot" />}
-              </Link>
-
-              <Link 
-                to="/faq" 
-                onClick={() => setMobileMenuOpen(false)}
-                className={`public-nav-item ${isActive('/faq') ? 'active' : ''}`}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                  <HelpCircle size={18} color={isActive('/faq') ? '#00C7FD' : '#94A3B8'} />
-                  <span>Perguntas Frequentes (FAQ)</span>
-                </div>
-                {isActive('/faq') && <span className="active-dot" />}
-              </Link>
-            </div>
-
-            <div style={{ height: '1px', background: 'rgba(0, 163, 224, 0.2)', margin: '0.75rem 0' }} />
-
-            {/* Ações Rápidas de Acesso no Menu Público */}
-            {user ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
-                <Link 
-                  to={panelRoute} 
-                  onClick={() => setMobileMenuOpen(false)} 
-                  className="btn btn-primary" 
-                  style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', minHeight: '44px' }}
-                >
-                  <PanelIcon size={18} />
-                  <span>Ir para o {panelLabel}</span>
-                </Link>
-                <button 
-                  onClick={() => { setMobileMenuOpen(false); handleSignOut(); }} 
-                  className="btn btn-secondary" 
-                  style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', minHeight: '44px' }}
-                >
-                  <LogOut size={16} />
-                  <span>Terminar Sessão</span>
-                </button>
+            <div className="public-mobile-dropdown-inner">
+              <div style={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                justifyContent: 'space-between', 
+                marginBottom: '0.85rem',
+                paddingBottom: '0.5rem',
+                borderBottom: '1px solid rgba(0, 163, 224, 0.15)'
+              }}>
+                <span style={{ 
+                  fontSize: '0.75rem', 
+                  fontWeight: '700', 
+                  color: '#00C7FD', 
+                  textTransform: 'uppercase', 
+                  letterSpacing: '0.06em' 
+                }}>
+                  Módulos & Navegação Pública
+                </span>
+                <span style={{ fontSize: '0.72rem', color: '#94A3B8' }}>
+                  Zaty Academy
+                </span>
               </div>
-            ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.65rem' }}>
+
+              <div className="public-nav-grid">
                 <Link 
-                  to="/login" 
-                  onClick={() => setMobileMenuOpen(false)} 
-                  className="btn btn-secondary" 
-                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.45rem', minHeight: '44px' }}
+                  to="/" 
+                  onClick={() => setMobileMenuOpen(false)}
+                  className={`public-nav-item ${isActive('/') && location.pathname === '/' ? 'active' : ''}`}
                 >
-                  <LogIn size={16} />
-                  <span>Iniciar Sessão</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                    <div className="public-nav-icon-box">
+                      <Home size={17} color={isActive('/') && location.pathname === '/' ? '#00C7FD' : '#BAE6FD'} />
+                    </div>
+                    <span>Página Inicial</span>
+                  </div>
+                  {isActive('/') && location.pathname === '/' && <span className="active-dot" />}
                 </Link>
+
+                <Link 
+                  to="/cursos" 
+                  onClick={() => setMobileMenuOpen(false)}
+                  className={`public-nav-item ${isActive('/cursos') ? 'active' : ''}`}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                    <div className="public-nav-icon-box">
+                      <BookOpen size={17} color={isActive('/cursos') ? '#00C7FD' : '#BAE6FD'} />
+                    </div>
+                    <span>Nossos Cursos</span>
+                  </div>
+                  {isActive('/cursos') && <span className="active-dot" />}
+                </Link>
+
                 <Link 
                   to="/inscricao" 
-                  onClick={() => setMobileMenuOpen(false)} 
-                  className="btn btn-primary" 
-                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.45rem', minHeight: '44px' }}
+                  onClick={() => setMobileMenuOpen(false)}
+                  className={`public-nav-item ${isActive('/inscricao') ? 'active' : ''}`}
                 >
-                  <UserPlus size={16} />
-                  <span>Inscrição Online</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                    <div className="public-nav-icon-box">
+                      <UserPlus size={17} color={isActive('/inscricao') ? '#00C7FD' : '#BAE6FD'} />
+                    </div>
+                    <span>Inscrição Online</span>
+                  </div>
+                  <span className="public-badge-open">Aberto</span>
+                </Link>
+
+                <Link 
+                  to="/inscricoes-abertas" 
+                  onClick={() => setMobileMenuOpen(false)}
+                  className={`public-nav-item ${isActive('/inscricoes-abertas') || isActive('/edital-inscricoes') ? 'active' : ''}`}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                    <div className="public-nav-icon-box">
+                      <Sparkles size={17} color={isActive('/inscricoes-abertas') || isActive('/edital-inscricoes') ? '#00C7FD' : '#BAE6FD'} />
+                    </div>
+                    <span>Edital & Inscrições</span>
+                  </div>
+                  {(isActive('/inscricoes-abertas') || isActive('/edital-inscricoes')) && <span className="active-dot" />}
+                </Link>
+
+                <Link 
+                  to="/noticias" 
+                  onClick={() => setMobileMenuOpen(false)}
+                  className={`public-nav-item ${isActive('/noticias') || isActive('/artigos') ? 'active' : ''}`}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                    <div className="public-nav-icon-box">
+                      <Newspaper size={17} color={isActive('/noticias') || isActive('/artigos') ? '#00C7FD' : '#BAE6FD'} />
+                    </div>
+                    <span>Notícias & Comunicados</span>
+                  </div>
+                  {(isActive('/noticias') || isActive('/artigos')) && <span className="active-dot" />}
+                </Link>
+
+                <Link 
+                  to="/sobre" 
+                  onClick={() => setMobileMenuOpen(false)}
+                  className={`public-nav-item ${isActive('/sobre') ? 'active' : ''}`}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                    <div className="public-nav-icon-box">
+                      <Info size={17} color={isActive('/sobre') ? '#00C7FD' : '#BAE6FD'} />
+                    </div>
+                    <span>Sobre a Instituição</span>
+                  </div>
+                  {isActive('/sobre') && <span className="active-dot" />}
+                </Link>
+
+                <Link 
+                  to="/validar" 
+                  onClick={() => setMobileMenuOpen(false)}
+                  className={`public-nav-item ${isActive('/validar') ? 'active' : ''}`}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                    <div className="public-nav-icon-box">
+                      <CheckCircle2 size={17} color={isActive('/validar') ? '#00C7FD' : '#BAE6FD'} />
+                    </div>
+                    <span>Validar Certificado</span>
+                  </div>
+                  {isActive('/validar') && <span className="active-dot" />}
+                </Link>
+
+                <Link 
+                  to="/contactos" 
+                  onClick={() => setMobileMenuOpen(false)}
+                  className={`public-nav-item ${isActive('/contactos') ? 'active' : ''}`}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                    <div className="public-nav-icon-box">
+                      <Phone size={17} color={isActive('/contactos') ? '#00C7FD' : '#BAE6FD'} />
+                    </div>
+                    <span>Contactos & Apoio</span>
+                  </div>
+                  {isActive('/contactos') && <span className="active-dot" />}
+                </Link>
+
+                <Link 
+                  to="/faq" 
+                  onClick={() => setMobileMenuOpen(false)}
+                  className={`public-nav-item ${isActive('/faq') ? 'active' : ''}`}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                    <div className="public-nav-icon-box">
+                      <HelpCircle size={17} color={isActive('/faq') ? '#00C7FD' : '#BAE6FD'} />
+                    </div>
+                    <span>Perguntas Frequentes (FAQ)</span>
+                  </div>
+                  {isActive('/faq') && <span className="active-dot" />}
                 </Link>
               </div>
-            )}
+
+              <div className="public-nav-divider" />
+
+              {/* Ações Rápidas de Acesso no Menu Público */}
+              {user ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+                  <Link 
+                    to={panelRoute} 
+                    onClick={() => setMobileMenuOpen(false)} 
+                    className="btn btn-primary" 
+                    style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', minHeight: '46px' }}
+                  >
+                    <PanelIcon size={18} />
+                    <span>Ir para o {panelLabel}</span>
+                  </Link>
+                  <button 
+                    onClick={() => { setMobileMenuOpen(false); handleSignOut(); }} 
+                    className="btn btn-secondary" 
+                    style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', minHeight: '44px' }}
+                  >
+                    <LogOut size={16} />
+                    <span>Terminar Sessão</span>
+                  </button>
+                </div>
+              ) : (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                  <Link 
+                    to="/login" 
+                    onClick={() => setMobileMenuOpen(false)} 
+                    className="btn btn-secondary" 
+                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.45rem', minHeight: '46px' }}
+                  >
+                    <LogIn size={16} />
+                    <span>Iniciar Sessão</span>
+                  </Link>
+                  <Link 
+                    to="/inscricao" 
+                    onClick={() => setMobileMenuOpen(false)} 
+                    className="btn btn-primary" 
+                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.45rem', minHeight: '46px' }}
+                  >
+                    <UserPlus size={16} />
+                    <span>Inscrição Online</span>
+                  </Link>
+                </div>
+              )}
+            </div>
           </nav>
         </>
       )}
 
       <style>{`
-        @media (min-width: 900px) {
+        @media (min-width: 1100px) {
           .desktop-nav { display: flex !important; }
           .mobile-actions { display: none !important; }
           .mobile-hamburger-btn { display: none !important; }
         }
-        @media (max-width: 899px) {
+        @media (max-width: 1099px) {
           .desktop-nav { display: none !important; }
           .mobile-actions { display: flex !important; }
           .mobile-hamburger-btn { display: flex !important; }
