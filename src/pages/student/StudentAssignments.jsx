@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import StudentSidebar from '../../components/student/StudentSidebar';
 import { getStudentAssignments, submitStudentAssignment } from '../../services/api';
@@ -12,13 +13,18 @@ import {
   Download, 
   Award, 
   X, 
-  MessageSquare,
-  FileCheck
+  MessageSquare, 
+  FileCheck,
+  RotateCcw
 } from 'lucide-react';
 
 export default function StudentAssignments() {
   const { student, user } = useAuth();
   const studentId = student?.id;
+
+  const activeEnrollment = student?.enrollments?.[0];
+  const isCourseCompleted = activeEnrollment?.status === 'concluido' || 
+    (typeof activeEnrollment?.final_grade === 'string' && activeEnrollment?.final_grade.toUpperCase().includes('APROVADO'));
 
   const [assignments, setAssignments] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -119,6 +125,66 @@ export default function StudentAssignments() {
             Consulte as tarefas publicadas pelos seus formadores, envie os seus ficheiros (PDF/DOCX) e acompanhe as notas.
           </p>
         </div>
+
+        {/* BANNER OFICIAL DE CURSO CONCLUÍDO & CERTIFICADO EMITIDO */}
+        {isCourseCompleted && (
+          <div style={{
+            background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.2) 0%, rgba(0, 199, 253, 0.12) 100%)',
+            border: '1.5px solid #10B981',
+            borderRadius: '8px',
+            padding: '1.25rem 1.5rem',
+            marginBottom: '1.5rem',
+            boxShadow: '0 4px 18px rgba(16, 185, 129, 0.15)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: '1rem'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem', flex: '1 1 300px' }}>
+              <div style={{
+                width: '44px',
+                height: '44px',
+                borderRadius: '8px',
+                background: 'rgba(16, 185, 129, 0.25)',
+                border: '1px solid #10B981',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0
+              }}>
+                <Award size={24} color="#34D399" />
+              </div>
+              <div>
+                <span className="badge badge-success" style={{ fontSize: '0.7rem', textTransform: 'uppercase', marginBottom: '0.2rem', display: 'inline-block' }}>
+                  Atividades Encerradas — Curso Concluído
+                </span>
+                <p style={{ color: '#D1FAE5', fontSize: '0.885rem', lineHeight: 1.5, margin: 0, fontWeight: '600' }}>
+                  “Este curso já foi concluído. O seu certificado foi emitido. Para continuar os seus estudos, solicite uma nova matrícula noutro curso ou atualize o seu percurso académico.”
+                </p>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', flexWrap: 'wrap' }}>
+              <Link
+                to="/estudante/certificados"
+                className="btn btn-primary btn-sm"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+              >
+                <Award size={14} />
+                <span>Ver Meu Certificado</span>
+              </Link>
+              <Link
+                to="/estudante/atualizar-curso"
+                className="btn btn-secondary btn-sm"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+              >
+                <RotateCcw size={14} />
+                <span>Atualizar Percurso</span>
+              </Link>
+            </div>
+          </div>
+        )}
 
         {/* Resumo de Indicadores dos Trabalhos */}
         {!loading && assignments.length > 0 && (
@@ -297,7 +363,11 @@ export default function StudentAssignments() {
                           </a>
                         )}
 
-                        {(!isGraded || (!isOverdue && isSubmitted)) && (
+                        {isCourseCompleted ? (
+                          <span className="badge badge-success" style={{ fontSize: '0.72rem', padding: '0.35rem 0.65rem' }}>
+                            ✓ Concluído & Certificado
+                          </span>
+                        ) : (!isGraded || (!isOverdue && isSubmitted)) ? (
                           <button
                             type="button"
                             onClick={() => handleOpenSubmitModal(asg)}
@@ -307,7 +377,7 @@ export default function StudentAssignments() {
                             <Upload size={14} />
                             <span>{sub ? 'Substituir Envio' : 'Submeter Trabalho'}</span>
                           </button>
-                        )}
+                        ) : null}
                       </div>
                     </div>
                   </div>

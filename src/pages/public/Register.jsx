@@ -6,7 +6,8 @@ import {
   uploadPublicFile, 
   uploadPrivateDocument, 
   checkStudentDuplicates, 
-  enrollAdditionalCourse 
+  enrollAdditionalCourse,
+  getStudentCoursesEligibility 
 } from '../../services/api';
 import { calculateAge, formatCurrency } from '../../utils/formatters';
 import { isValidMozPhone, isValidEmail, validateFile } from '../../utils/validators';
@@ -63,6 +64,7 @@ export default function Register() {
   const [selectedAdditionalCourse, setSelectedAdditionalCourse] = useState('');
   const [submittingAdditional, setSubmittingAdditional] = useState(false);
   const [additionalSuccess, setAdditionalSuccess] = useState(null);
+  const [eligibilityMap, setEligibilityMap] = useState({});
 
   // Visibilidade de senhas
   const [showPassword, setShowPassword] = useState(false);
@@ -113,6 +115,20 @@ export default function Register() {
     }
     fetchCourses();
   }, [preselectedCourseId]);
+
+  // Carrega mapa de elegibilidade académica para o estudante logado
+  useEffect(() => {
+    if (!student?.id) return;
+    let isMounted = true;
+    getStudentCoursesEligibility(student.id).then(map => {
+      if (isMounted && map) {
+        setEligibilityMap(map);
+      }
+    }).catch(err => {
+      console.warn('Erro ao carregar elegibilidade de cursos:', err);
+    });
+    return () => { isMounted = false; };
+  }, [student?.id]);
 
   const age = calculateAge(formData.birth_date);
   const selectedCourse = courses.find(c => c.id === formData.course_id);
@@ -614,17 +630,51 @@ export default function Register() {
                   <label className="form-label">Curso Pretendido *</label>
                   <select
                     value={selectedAdditionalCourse}
-                    onChange={(e) => setSelectedAdditionalCourse(e.target.value)}
+                    onChange={(e) => {
+                      setSelectedAdditionalCourse(e.target.value);
+                      setErrorMsg('');
+                    }}
                     className="form-select"
                     required
                   >
                     <option value="">-- Escolha um Curso --</option>
-                    {courses.map(c => (
-                      <option key={c.id} value={c.id}>
-                        {c.title} ({formatCurrency(c.price)})
-                      </option>
-                    ))}
+                    {courses.map(c => {
+                      const elig = eligibilityMap[c.id];
+                      const isBlocked = elig && !elig.eligible;
+                      const isReproved = elig && elig.canReEnrollReproved;
+                      return (
+                        <option 
+                          key={c.id} 
+                          value={c.id}
+                          disabled={isBlocked}
+                        >
+                          {c.title} ({formatCurrency(c.price)})
+                          {isBlocked ? ' — [CONCLUÍDO & CERTIFICADO - BLOQUEADO]' : isReproved ? ' — [REPROVAÇÃO PRÉVIA - MATRÍCULA PERMITIDA]' : ''}
+                        </option>
+                      );
+                    })}
                   </select>
+
+                  {selectedAdditionalCourse && eligibilityMap[selectedAdditionalCourse] && !eligibilityMap[selectedAdditionalCourse].eligible && (
+                    <div style={{ marginTop: '0.75rem', padding: '0.75rem', borderRadius: '6px', background: 'rgba(239, 68, 68, 0.15)', border: '1px solid #EF4444', color: '#FCA5A5', fontSize: '0.85rem', lineHeight: '1.4' }}>
+                      <AlertCircle size={16} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '6px' }} />
+                      {eligibilityMap[selectedAdditionalCourse].message}
+                    </div>
+                  )}
+
+                  {selectedAdditionalCourse && eligibilityMap[selectedAdditionalCourse]?.canReEnrollReproved && (
+                    <div style={{ marginTop: '0.75rem', padding: '0.75rem', borderRadius: '6px', background: 'rgba(14, 165, 233, 0.15)', border: '1px solid #0EA5E9', color: '#7DD3FC', fontSize: '0.85rem', lineHeight: '1.4' }}>
+                      <CheckCircle2 size={16} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '6px' }} />
+                      {eligibilityMap[selectedAdditionalCourse].message}
+                    </div>
+                  )}
+
+                  {errorMsg && (
+                    <div style={{ marginTop: '0.75rem', padding: '0.75rem', borderRadius: '6px', background: 'rgba(239, 68, 68, 0.2)', border: '1px solid #EF4444', color: '#FCA5A5', fontSize: '0.85rem', lineHeight: '1.4' }}>
+                      <AlertCircle size={16} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '6px' }} />
+                      {errorMsg}
+                    </div>
+                  )}
                 </div>
 
                 <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', marginTop: '1.25rem' }}>
@@ -637,7 +687,7 @@ export default function Register() {
                   </button>
                   <button
                     type="submit"
-                    disabled={submittingAdditional}
+                    disabled={submittingAdditional || (selectedAdditionalCourse && eligibilityMap[selectedAdditionalCourse]?.eligible === false)}
                     className="btn btn-primary"
                   >
                     {submittingAdditional ? 'A submeter...' : 'Confirmar Nova Inscrição'}
@@ -826,17 +876,51 @@ export default function Register() {
                 <label className="form-label">Selecione o Curso Adicional *</label>
                 <select
                   value={selectedAdditionalCourse}
-                  onChange={(e) => setSelectedAdditionalCourse(e.target.value)}
+                  onChange={(e) => {
+                    setSelectedAdditionalCourse(e.target.value);
+                    setErrorMsg('');
+                  }}
                   className="form-select"
                   required
                 >
                   <option value="">-- Escolha um Curso --</option>
-                  {courses.map(c => (
-                    <option key={c.id} value={c.id}>
-                      {c.title} ({formatCurrency(c.price)})
-                    </option>
-                  ))}
+                  {courses.map(c => {
+                    const elig = eligibilityMap[c.id];
+                    const isBlocked = elig && !elig.eligible;
+                    const isReproved = elig && elig.canReEnrollReproved;
+                    return (
+                      <option 
+                        key={c.id} 
+                        value={c.id}
+                        disabled={isBlocked}
+                      >
+                        {c.title} ({formatCurrency(c.price)})
+                        {isBlocked ? ' — [CONCLUÍDO & CERTIFICADO - BLOQUEADO]' : isReproved ? ' — [REPROVAÇÃO PRÉVIA - MATRÍCULA PERMITIDA]' : ''}
+                      </option>
+                    );
+                  })}
                 </select>
+
+                {selectedAdditionalCourse && eligibilityMap[selectedAdditionalCourse] && !eligibilityMap[selectedAdditionalCourse].eligible && (
+                  <div style={{ marginTop: '0.75rem', padding: '0.75rem', borderRadius: '6px', background: 'rgba(239, 68, 68, 0.15)', border: '1px solid #EF4444', color: '#FCA5A5', fontSize: '0.85rem', lineHeight: '1.4' }}>
+                    <AlertCircle size={16} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '6px' }} />
+                    {eligibilityMap[selectedAdditionalCourse].message}
+                  </div>
+                )}
+
+                {selectedAdditionalCourse && eligibilityMap[selectedAdditionalCourse]?.canReEnrollReproved && (
+                  <div style={{ marginTop: '0.75rem', padding: '0.75rem', borderRadius: '6px', background: 'rgba(14, 165, 233, 0.15)', border: '1px solid #0EA5E9', color: '#7DD3FC', fontSize: '0.85rem', lineHeight: '1.4' }}>
+                    <CheckCircle2 size={16} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '6px' }} />
+                    {eligibilityMap[selectedAdditionalCourse].message}
+                  </div>
+                )}
+
+                {errorMsg && (
+                  <div style={{ marginTop: '0.75rem', padding: '0.75rem', borderRadius: '6px', background: 'rgba(239, 68, 68, 0.2)', border: '1px solid #EF4444', color: '#FCA5A5', fontSize: '0.85rem', lineHeight: '1.4' }}>
+                    <AlertCircle size={16} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '6px' }} />
+                    {errorMsg}
+                  </div>
+                )}
               </div>
 
               <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', marginTop: '1.25rem' }}>
@@ -849,7 +933,7 @@ export default function Register() {
                 </button>
                 <button
                   type="submit"
-                  disabled={submittingAdditional}
+                  disabled={submittingAdditional || (selectedAdditionalCourse && eligibilityMap[selectedAdditionalCourse]?.eligible === false)}
                   className="btn btn-primary"
                 >
                   {submittingAdditional ? 'A registar matrícula...' : 'Confirmar Solicitação'}

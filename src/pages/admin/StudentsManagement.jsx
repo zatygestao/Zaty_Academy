@@ -6,6 +6,7 @@ import {
   reactivateStudent,
   deleteStudentPermanently 
 } from '../../services/api';
+import { subscribeToCourseUpdates } from '../../services/realtimeService';
 import { useAuth } from '../../context/AuthContext';
 import AdminSidebar from '../../components/admin/AdminSidebar';
 import StudentDetailsModal from '../../components/admin/StudentDetailsModal';
@@ -101,6 +102,24 @@ export default function StudentsManagement() {
     }, 300);
     return () => clearTimeout(timer);
   }, [search, statusFilter]);
+
+  // Escuta atualizações de curso em tempo real e atualiza a tabela instantaneamente
+  useEffect(() => {
+    const unsubscribe = subscribeToCourseUpdates((payload) => {
+      fetchStudents();
+      if (payload) {
+        showToast(
+          `O estudante ${payload.studentName || 'Estudante'} atualizou o curso de ${payload.previousCourseTitle || 'curso anterior'} para ${payload.newCourseTitle || 'novo curso'}.`,
+          'info'
+        );
+      }
+    });
+    return () => {
+      if (typeof unsubscribe === 'function') {
+        unsubscribe();
+      }
+    };
+  }, []);
 
   const showToast = (text, type = 'success') => {
     setToastMessage({ text, type });

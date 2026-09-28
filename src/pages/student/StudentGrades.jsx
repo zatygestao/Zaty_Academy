@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import StudentSidebar from '../../components/student/StudentSidebar';
 import { getStudentGradesReport } from '../../services/api';
@@ -13,10 +14,10 @@ import {
   User, 
   Clock, 
   GraduationCap, 
-  Wrench,
-  HelpCircle,
-  FileText,
-  FileCheck
+  Wrench, 
+  HelpCircle, 
+  FileText, 
+  FileCheck 
 } from 'lucide-react';
 
 export default function StudentGrades() {
@@ -48,6 +49,9 @@ export default function StudentGrades() {
   }, [studentId]);
 
   const activeReport = reports[selectedReportIndex] || null;
+  const isReportCompleted = activeReport?.finalStatus === 'APROVADO' || 
+    activeReport?.enrollment_status === 'concluido' ||
+    student?.enrollments?.some(e => e.id === activeReport?.enrollment_id && e.status === 'concluido');
 
   const getEvalBadge = (type, isRecovery) => {
     if (isRecovery) {
@@ -154,6 +158,73 @@ export default function StudentGrades() {
 
             {activeReport && (
               <>
+                {/* BANNER OFICIAL DE CONCLUSÃO & CERTIFICADO */}
+                {isReportCompleted && (
+                  <div style={{
+                    background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.2) 0%, rgba(0, 199, 253, 0.12) 100%)',
+                    border: '1.5px solid #10B981',
+                    borderRadius: '8px',
+                    padding: '1.25rem 1.5rem',
+                    marginBottom: '1.5rem',
+                    boxShadow: '0 4px 18px rgba(16, 185, 129, 0.15)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    flexWrap: 'wrap',
+                    gap: '1rem'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem', flex: '1 1 300px' }}>
+                      <div style={{
+                        width: '44px',
+                        height: '44px',
+                        borderRadius: '8px',
+                        background: 'rgba(16, 185, 129, 0.25)',
+                        border: '1px solid #10B981',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexShrink: 0
+                      }}>
+                        <Award size={24} color="#34D399" />
+                      </div>
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.2rem' }}>
+                          <span className="badge badge-success" style={{ fontSize: '0.7rem' }}>
+                            Aprovação Concluída
+                          </span>
+                          {activeReport?.finalAverage !== null && (
+                            <span style={{ fontSize: '0.74rem', color: '#6EE7B7' }}>
+                              • Média Oficial: {activeReport.finalAverage}/20
+                            </span>
+                          )}
+                        </div>
+                        <p style={{ color: '#D1FAE5', fontSize: '0.885rem', lineHeight: 1.5, margin: 0, fontWeight: '600' }}>
+                          “Este curso já foi concluído. O seu certificado foi emitido. Para continuar os seus estudos, solicite uma nova matrícula noutro curso ou atualize o seu percurso académico.”
+                        </p>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', flexWrap: 'wrap' }}>
+                      <Link
+                        to="/estudante/certificados"
+                        className="btn btn-primary btn-sm"
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+                      >
+                        <Award size={14} />
+                        <span>Ver Meu Certificado</span>
+                      </Link>
+                      <Link
+                        to="/estudante/atualizar-curso"
+                        className="btn btn-secondary btn-sm"
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+                      >
+                        <RotateCcw size={14} />
+                        <span>Atualizar Percurso</span>
+                      </Link>
+                    </div>
+                  </div>
+                )}
+
                 {/* CARTÃO DE RESUMO ACADÉMICO / MÉDIA FINAL */}
                 <div className="glass-card" style={{ padding: 'clamp(1.15rem, 3.5vw, 1.6rem)', marginBottom: '1.5rem', border: '1px solid rgba(0, 199, 253, 0.3)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1.25rem' }}>

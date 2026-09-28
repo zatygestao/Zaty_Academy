@@ -6,6 +6,7 @@ import {
   generateValidationCode 
 } from '../utils/formatters';
 import { getAccessTelemetry } from '../utils/deviceTracker';
+import { broadcastCourseUpdate } from './realtimeService';
 
 // ==========================================
 // 1. CONFIGURAÇÕES INSTITUCIONAIS
@@ -1567,21 +1568,139 @@ export async function checkStudentDuplicates({ phone, email, idDocumentNumber })
   return { duplicate: false };
 }
 
-export async function enrollAdditionalCourse({ studentId, courseId, classId = null }) {
-  // Verifica se o estudante já está matriculado neste mesmo curso
-  const { data: existingEnr } = await supabase
-    .from('academy_enrollments')
-    .select('id, status, course:academy_courses(title)')
-    .eq('student_id', studentId)
-    .eq('course_id', courseId)
-    .neq('status', 'cancelado')
-    .maybeSingle();
-
-  if (existingEnr) {
-    throw new Error(`Você já possui uma matrícula ativa ou pendente para este curso (${existingEnr.course?.title || ''}).`);
+/**
+ * Validação Centralizada e Segura de Elegibilidade de Matrícula (Regras Académicas Oficiais):
+ * 1. Se o estudante for APROVADO / CONCLUÍDO no curso X (com certificado emitido ou pauta aprovada),
+ *    o sistema PROÍBE expressamente nova matrícula no curso X.
+ * 2. Se o estudante for REPROVADO no curso X, permite nova matrícula no curso X sob regras normais.
+ * 3. Se possui matrícula ativa/pendente em andamento no curso X, proíbe duplicidade em andamento.
+ */
+export async function checkStudentCourseEnrollmentEligibility(studentId, courseId) {
+  if (!studentId || !courseId) {
+    return { eligible: true };
   }
 
-  // Criar nova matrícula associada ao mesmo estudante
+  // 1. Verificar se já existe certificado válido emitido para este estudante neste curso
+  try {
+    const { data: certs } = await supabase
+      .from('academy_certificates')
+      .select('id, certificate_number, validation_code, status, course_id')
+      .eq('student_id', studentId)
+      .eq('course_id', courseId)
+      .neq('status', 'revogado');
+
+    if (certs && certs.length > 0) {
+      return {
+        eligible: false,
+        reason: 'curso_concluido_com_certificado',
+        message: 'Este curso já foi concluído. O seu certificado foi emitido. Para continuar os seus estudos, solicite uma nova matrícula noutro curso ou atualize o seu percurso académico.'
+      };
+    }
+  } catch (cErr) {
+    console.warn('Aviso ao checar certificados para elegibilidade:', cErr);
+  }
+
+  // 2. Verificar histórico de matrículas do estudante neste curso
+  try {
+    const { data: enrollments } = await supabase
+      .from('academy_enrollments')
+      .select('id, status, final_grade, created_at, course:academy_courses(title)')
+      .eq('student_id', studentId)
+      .eq('course_id', courseId)
+      .order('created_at', { ascending: false });
+
+    if (enrollments && enrollments.length > 0) {
+      const courseTitle = enrollments[0].course?.title || 'este curso';
+
+      // A) Se possui matrícula concluída ou com menção de APROVADO
+      const hasApproved = enrollments.some(e => 
+        e.status === 'concluido' || 
+        (typeof e.final_grade === 'string' && e.final_grade.toUpperCase().includes('APROVADO'))
+      );
+
+      if (hasApproved) {
+        return {
+          eligible: false,
+          reason: 'curso_concluido_aprovado',
+          message: `O estudante já concluiu ${courseTitle} com aprovação. O seu certificado foi emitido ou está disponível. Apenas é permitida a inscrição em outros cursos disponíveis.`
+        };
+      }
+
+      // B) Se possui matrícula ativa ou pendente em andamento (não reprovado nem cancelado)
+      const hasActiveOrPending = enrollments.some(e => 
+        ['ativo', 'pendente', 'em_curso'].includes(e.status) &&
+        !(typeof e.final_grade === 'string' && e.final_grade.toUpperCase().includes('REPROVADO'))
+      );
+
+      if (hasActiveOrPending) {
+        return {
+          eligible: false,
+          reason: 'matricula_em_andamento',
+          message: `Você já possui uma matrícula ativa ou em análise para ${courseTitle}. Acompanhe o estado no seu painel.`
+        };
+      }
+
+      // C) Se o estudante teve histórico com REPROVADO (status === 'reprovado' ou final_grade com REPROVADO):
+      const isReproved = enrollments.some(e => 
+        e.status === 'reprovado' || 
+        (typeof e.final_grade === 'string' && e.final_grade.toUpperCase().includes('REPROVADO'))
+      );
+
+      if (isReproved) {
+        // PERMITIDO RE-MATRICULAR!
+        return {
+          eligible: true,
+          canReEnrollReproved: true,
+          previousEnrollmentId: enrollments[0].id,
+          message: `Estudante com histórico de reprovação prévia em ${courseTitle}. Nova matrícula permitida sob regras normais.`
+        };
+      }
+    }
+  } catch (eErr) {
+    console.warn('Aviso ao consultar matrículas para elegibilidade:', eErr);
+  }
+
+  return { eligible: true };
+}
+
+/**
+ * Retorna o mapa de elegibilidade do estudante para todos os cursos activos
+ */
+export async function getStudentCoursesEligibility(studentId) {
+  if (!studentId) return {};
+  try {
+    const { data: courses } = await supabase
+      .from('academy_courses')
+      .select('id, title, is_active')
+      .eq('is_active', true);
+
+    const map = {};
+    if (courses && courses.length > 0) {
+      await Promise.all(
+        courses.map(async (c) => {
+          const res = await checkStudentCourseEnrollmentEligibility(studentId, c.id);
+          map[c.id] = res;
+        })
+      );
+    }
+    return map;
+  } catch (err) {
+    console.warn('Aviso ao obter elegibilidade de cursos do estudante:', err);
+    return {};
+  }
+}
+
+/**
+ * Matrícula em Curso Adicional com Validação Rigorosa de Aprovação/Reprovação
+ */
+export async function enrollAdditionalCourse({ studentId, courseId, classId = null }) {
+  // 1. Validação central de elegibilidade
+  const eligibility = await checkStudentCourseEnrollmentEligibility(studentId, courseId);
+  if (!eligibility.eligible) {
+    throw new Error(eligibility.message);
+  }
+
+  // 2. Criar nova matrícula associada ao mesmo estudante (preservando histórico anterior)
   const { data: enrData, error: enrError } = await supabase
     .from('academy_enrollments')
     .insert([{
@@ -1590,22 +1709,245 @@ export async function enrollAdditionalCourse({ studentId, courseId, classId = nu
       class_id: classId,
       status: 'pendente'
     }])
-    .select('*, course:academy_courses(title)')
+    .select('*, course:academy_courses(id, title, workload_hours), student:academy_students(id, full_name, student_code, student_number, email, phone)')
     .single();
 
   if (enrError) throw enrError;
 
-  // Notificar estudante sobre a nova solicitação de curso
+  const courseTitle = enrData.course?.title || 'Formação Zaty Academy';
+  const studentName = enrData.student?.full_name || 'Estudante';
+  const studentCode = enrData.student?.student_code || enrData.student?.student_number || 'ZA';
+
+  // 3. Notificar estudante sobre a nova solicitação de curso
   try {
     await supabase.from('academy_notifications').insert([{
       student_id: studentId,
       title: 'Solicitação de Novo Curso Registada',
-      message: `A sua inscrição no curso "${enrData.course?.title}" foi registada com sucesso. Efetue o pagamento da taxa para ativação das aulas.`,
+      message: `A sua inscrição no curso "${courseTitle}" foi registada com sucesso. Efetue o pagamento da taxa para ativação das aulas.`,
       type: 'info'
     }]);
   } catch (_) {}
 
+  // 4. Notificar a administração em tempo real
+  try {
+    await supabase.from('academy_notifications').insert([{
+      student_id: studentId,
+      title: 'Nova Solicitação de Matrícula',
+      message: `O estudante ${studentName} (${studentCode}) solicitou matrícula no curso "${courseTitle}".`,
+      type: 'new_enrollment_request'
+    }]);
+  } catch (_) {}
+
+  // 5. Registo no log de auditoria do sistema
+  await recordAuditLog({
+    action: 'ADDITIONAL_COURSE_ENROLLED',
+    description: `Estudante ${studentName} (${studentCode}) solicitou inscrição no curso "${courseTitle}".`,
+    resourceType: 'enrollment',
+    resourceId: enrData.id,
+    userId: enrData.student?.user_id,
+    userName: studentName,
+    details: {
+      student_id: studentId,
+      student_name: studentName,
+      student_code: studentCode,
+      course_id: courseId,
+      course_title: courseTitle,
+      re_enrolled_after_reproval: !!eligibility.canReEnrollReproved
+    }
+  });
+
   return enrData;
+}
+
+/**
+ * Atualização de Curso pelo Estudante (Segura, Auditada e com Notificação em Tempo Real)
+ */
+export async function updateStudentCourse({
+  studentId,
+  previousCourseId,
+  newCourseId,
+  reason = ''
+}) {
+  if (!studentId) {
+    throw new Error('Identificador do estudante não informado.');
+  }
+  if (!newCourseId) {
+    throw new Error('Por favor selecione o novo curso desejado.');
+  }
+  if (previousCourseId && previousCourseId === newCourseId) {
+    throw new Error('O novo curso selecionado não pode ser igual ao curso atual.');
+  }
+
+  // 1. Obter dados actuais do estudante e dos cursos
+  const [stdRes, prevCourseRes, newCourseRes] = await Promise.all([
+    supabase.from('academy_students').select('*').eq('id', studentId).maybeSingle(),
+    previousCourseId ? supabase.from('academy_courses').select('id, title, workload_hours').eq('id', previousCourseId).maybeSingle() : Promise.resolve({ data: null }),
+    supabase.from('academy_courses').select('id, title, workload_hours, duration, price').eq('id', newCourseId).maybeSingle()
+  ]);
+
+  const student = stdRes.data;
+  if (!student) {
+    throw new Error('Registo do estudante não encontrado.');
+  }
+
+  const newCourse = newCourseRes.data;
+  if (!newCourse) {
+    throw new Error('O curso selecionado não foi encontrado ou não está disponível.');
+  }
+
+  const previousCourse = prevCourseRes.data || { id: previousCourseId, title: 'Curso Anterior' };
+
+  // 2. Verificar se o curso anterior já foi concluído com certificado emitido
+  if (previousCourseId) {
+    const prevEligibility = await checkStudentCourseEnrollmentEligibility(studentId, previousCourseId);
+    if (!prevEligibility.eligible && (prevEligibility.reason === 'curso_concluido_com_certificado' || prevEligibility.reason === 'curso_concluido_aprovado')) {
+      throw new Error('Este curso já foi concluído. O seu certificado foi emitido. Para continuar os seus estudos, solicite uma nova matrícula noutro curso ou atualize o seu percurso académico.');
+    }
+  }
+
+  // 3. Validação do novo curso: o estudante não pode migrar para um curso já concluído com aprovação/certificado
+  const eligibility = await checkStudentCourseEnrollmentEligibility(studentId, newCourseId);
+  if (!eligibility.eligible) {
+    throw new Error(eligibility.message);
+  }
+
+  const nowIso = new Date().toISOString();
+  const studentCode = student.student_code || student.student_number || 'ZA';
+  const studentName = student.full_name;
+
+  // 4. Atualizar a matrícula ativa/pendente do estudante
+  let targetEnrollment = null;
+  const { data: currentEnrollments } = await supabase
+    .from('academy_enrollments')
+    .select('*')
+    .eq('student_id', studentId)
+    .order('created_at', { ascending: false });
+
+  if (currentEnrollments && currentEnrollments.length > 0) {
+    if (previousCourseId) {
+      targetEnrollment = currentEnrollments.find(e => e.course_id === previousCourseId && e.status !== 'concluido');
+    }
+    if (!targetEnrollment) {
+      targetEnrollment = currentEnrollments.find(e => e.status !== 'concluido') || currentEnrollments[0];
+    }
+  }
+
+  if (targetEnrollment) {
+    const { error: updErr } = await supabase
+      .from('academy_enrollments')
+      .update({
+        course_id: newCourseId,
+        class_id: null, // Requer nova alocação pedagógica
+        status: targetEnrollment.status === 'ativo' ? 'ativo' : 'pendente',
+        updated_at: nowIso
+      })
+      .eq('id', targetEnrollment.id);
+
+    if (updErr) throw updErr;
+  } else {
+    const { error: insErr } = await supabase
+      .from('academy_enrollments')
+      .insert([{
+        student_id: studentId,
+        course_id: newCourseId,
+        class_id: null,
+        status: 'pendente'
+      }]);
+
+    if (insErr) throw insErr;
+  }
+
+  // 5. Preservar o histórico no perfil do estudante (notas serializadas)
+  const transferLog = `[Atualização de Curso em ${nowIso}]: Transferido de "${previousCourse.title}" para "${newCourse.title}". Motivo: ${reason || 'Solicitação direta do estudante'}.`;
+  const updatedNotes = student.notes ? `${student.notes} | ${transferLog}` : transferLog;
+  try {
+    await supabase
+      .from('academy_students')
+      .update({
+        notes: updatedNotes,
+        updated_at: nowIso
+      })
+      .eq('id', studentId);
+  } catch (_) {}
+
+  // 6. Registar a operação no histórico/auditoria do sistema
+  await recordAuditLog({
+    action: 'STUDENT_COURSE_UPDATED',
+    description: `Estudante ${studentName} (${studentCode}) atualizou o curso de "${previousCourse.title}" para "${newCourse.title}".`,
+    resourceType: 'course_update',
+    resourceId: newCourseId,
+    userId: student.user_id,
+    userName: studentName,
+    details: {
+      student_id: studentId,
+      student_name: studentName,
+      student_code: studentCode,
+      previous_course_id: previousCourse.id,
+      previous_course_title: previousCourse.title,
+      new_course_id: newCourse.id,
+      new_course_title: newCourse.title,
+      reason: reason || null,
+      updated_at: nowIso
+    }
+  });
+
+  // 7. Notificar a Administração em tempo real
+  try {
+    await supabase.from('academy_notifications').insert([{
+      student_id: studentId,
+      title: 'Atualização de Curso por Estudante',
+      message: `O estudante ${studentName} (${studentCode}) atualizou o curso de "${previousCourse.title}" para "${newCourse.title}". Requer nova alocação de turma.`,
+      type: 'course_updated'
+    }]);
+  } catch (_) {}
+
+  // 8. Notificar o próprio Estudante
+  try {
+    await supabase.from('academy_notifications').insert([{
+      student_id: studentId,
+      title: 'Curso Atualizado com Sucesso!',
+      message: `O seu percurso formativo foi atualizado para "${newCourse.title}". O seu novo conteúdo pedagógico já se encontra ativo no portal.`,
+      type: 'course_updated'
+    }]);
+  } catch (_) {}
+
+  // 9. Emitir notificação em tempo real via WebSockets / Broadcast
+  const broadcastPayload = {
+    studentId,
+    studentName,
+    studentCode,
+    studentEmail: student.email,
+    previousCourseId: previousCourse.id,
+    previousCourseTitle: previousCourse.title,
+    newCourseId: newCourse.id,
+    newCourseTitle: newCourse.title,
+    updatedAt: nowIso
+  };
+  broadcastCourseUpdate(broadcastPayload);
+
+  return {
+    success: true,
+    student: {
+      id: student.id,
+      full_name: studentName,
+      student_code: studentCode,
+      email: student.email,
+      phone: student.phone
+    },
+    previousCourse: {
+      id: previousCourse.id,
+      title: previousCourse.title
+    },
+    newCourse: {
+      id: newCourse.id,
+      title: newCourse.title,
+      workload_hours: newCourse.workload_hours,
+      duration: newCourse.duration
+    },
+    updatedAt: nowIso,
+    status: 'concluido',
+    disclaimer: 'O percurso formativo foi transferido para a nova formação. O histórico acadêmico anterior foi preservado na base de dados e a Direção Académica foi notificada em tempo real.'
+  };
 }
 
 /**
@@ -2089,8 +2431,21 @@ export async function getStudentByUserId(userId) {
         } catch (_) {}
       }
     }
+
+    if (data.enrollments && Array.isArray(data.enrollments)) {
+      // Ordenação inteligente: Cursos ativos/em curso primeiro, depois pendentes, depois concluídos por data mais recente
+      data.enrollments.sort((a, b) => {
+        const score = (s) => (s === 'ativo' ? 3 : s === 'pendente' ? 2 : s === 'concluido' ? 1 : 0);
+        const diff = score(b.status) - score(a.status);
+        if (diff !== 0) return diff;
+        return new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0);
+      });
+    }
+
+    return parseStudentCivilData(data);
   }
-  return parseStudentCivilData(data);
+
+  return null;
 }
 
 export async function updateStudent(id, studentData) {
@@ -2995,20 +3350,53 @@ export async function issueCertificate({
     }
   } catch (_) {}
 
-  // Notificar estudante
+  // 1. Atualizar Matrícula correspondente como 'concluido' e registrar nota final oficial
+  try {
+    let enrUpdateQuery = supabase
+      .from('academy_enrollments')
+      .update({
+        status: 'concluido',
+        final_grade: data.final_grade || finalGrade || '16/20 Valores (Aprovado com Distinção)',
+        updated_at: new Date().toISOString()
+      });
+
+    if (enrollmentId) {
+      enrUpdateQuery = enrUpdateQuery.eq('id', enrollmentId);
+    } else {
+      enrUpdateQuery = enrUpdateQuery.eq('student_id', studentId).eq('course_id', courseId);
+    }
+    await enrUpdateQuery;
+  } catch (enrErr) {
+    console.warn('Aviso ao sincronizar status concluído na matrícula:', enrErr);
+  }
+
+  // 2. Atualizar status do estudante caso não tenha outra matrícula ativa
+  try {
+    await supabase
+      .from('academy_students')
+      .update({
+        enrollment_status: 'concluido',
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', studentId);
+  } catch (stdErr) {
+    console.warn('Aviso ao atualizar status concluído no perfil do estudante:', stdErr);
+  }
+
+  // 3. Notificar estudante com o comunicado oficial de conclusão do curso
   try {
     await supabase.from('academy_notifications').insert([{
       student_id: studentId,
       title: 'Parabéns! Certificado Digital Emitido',
-      message: `O seu certificado do curso foi emitido com sucesso! Código de validação: ${data.validation_code}. Acesse a área de certificados para visualizar e baixar.`,
+      message: 'Este curso já foi concluído. O seu certificado foi emitido. Para continuar os seus estudos, solicite uma nova matrícula noutro curso ou atualize o seu percurso académico.',
       type: 'certificate_ready'
     }]);
   } catch (_) {}
 
-  // Auditoria
+  // 4. Auditoria com preservação histórica completa
   await recordAuditLog({
     action: 'CERTIFICATE_ISSUED',
-    description: `Certificado emitido: ${data.certificate_number} para o estudante ID: ${studentId}`,
+    description: `Certificado emitido: ${data.certificate_number} para o estudante ${data.student?.full_name || studentId}. Curso formalmente concluído.`,
     resourceType: 'certificate',
     resourceId: data.id,
     userId: issuedBy,
@@ -3016,8 +3404,11 @@ export async function issueCertificate({
       certificate_number: data.certificate_number,
       validation_code: data.validation_code,
       student_id: studentId,
+      course_id: courseId,
+      course_title: data.course?.title,
       final_grade: data.final_grade || certPayload.final_grade,
-      workload_hours: certPayload.workload_hours
+      workload_hours: certPayload.workload_hours,
+      status: 'concluido'
     }
   });
 

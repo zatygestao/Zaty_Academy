@@ -37,6 +37,7 @@ const StudentCertificates = lazy(() => import('./pages/student/StudentCertificat
 const StudentArticles = lazy(() => import('./pages/student/StudentArticles'));
 const StudentProfile = lazy(() => import('./pages/student/StudentProfile'));
 const StudentGrades = lazy(() => import('./pages/student/StudentGrades'));
+const StudentCourseUpdate = lazy(() => import('./pages/student/StudentCourseUpdate'));
 
 // Teacher Pages
 const TeacherDashboard = lazy(() => import('./pages/teacher/TeacherDashboard'));
@@ -153,6 +154,14 @@ export default function App() {
                     element={
                       <ProtectedRoute>
                         <StudentCourses />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/estudante/atualizar-curso"
+                    element={
+                      <ProtectedRoute requireStudent={true}>
+                        <StudentCourseUpdate />
                       </ProtectedRoute>
                     }
                   />

@@ -171,6 +171,65 @@ export function subscribeToContactMessages(onContactChange) {
 }
 
 /**
+ * Notifica a administração em tempo real sobre atualizações de curso realizadas por estudantes
+ */
+export function broadcastCourseUpdate(data) {
+  try {
+    const channel = supabase.channel('academy_system_broadcasts');
+    channel.send({
+      type: 'broadcast',
+      event: 'student_course_updated',
+      payload: data
+    });
+  } catch (err) {
+    console.warn('[Realtime] Falha no broadcast de atualização de curso:', err);
+  }
+}
+
+/**
+ * Escuta em tempo real atualizações de curso de estudantes (canal dedicado para administração)
+ */
+export function subscribeToCourseUpdates(onCourseUpdate) {
+  // 1. Escuta via broadcast de alta velocidade
+  const topic = `realtime_course_updates_${Date.now()}`;
+  const broadcastChannel = supabase.channel(topic);
+  
+  broadcastChannel.on('broadcast', { event: 'student_course_updated' }, (payload) => {
+    try {
+      if (onCourseUpdate && payload?.payload) onCourseUpdate(payload.payload);
+    } catch (e) {
+      console.warn('[Realtime] Erro ao processar broadcast de curso:', e);
+    }
+  });
+  
+  broadcastChannel.subscribe();
+  activeChannels.set(topic, broadcastChannel);
+
+  // 2. Escuta complementar via Postgres changes na tabela de auditoria
+  const auditSub = subscribeToTable({
+    table: 'academy_audit_logs',
+    event: 'INSERT',
+    onInsert: (newLog) => {
+      if (newLog.action === 'STUDENT_COURSE_UPDATED' || newLog.resource_type === 'course_update') {
+        if (onCourseUpdate) onCourseUpdate(newLog.details || newLog);
+      }
+    }
+  });
+
+  return {
+    unsubscribe: () => {
+      try {
+        if (activeChannels.has(topic)) {
+          activeChannels.delete(topic);
+          supabase.removeChannel(broadcastChannel);
+        }
+        if (auditSub?.unsubscribe) auditSub.unsubscribe();
+      } catch (_) {}
+    }
+  };
+}
+
+/**
  * Remove todos os canais ativos (útil em logout ou desmontagem global)
  */
 export function unsubscribeAllRealtime() {

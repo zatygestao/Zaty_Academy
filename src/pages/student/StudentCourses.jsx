@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { getLessonProgress, toggleLessonProgress, getCourseBySlug } from '../../services/api';
 import StudentSidebar from '../../components/student/StudentSidebar';
@@ -21,7 +22,10 @@ import {
   ArrowRight,
   UserCheck,
   Users,
-  MapPin
+  MapPin,
+  RotateCcw,
+  Award,
+  Sparkles
 } from 'lucide-react';
 
 export default function StudentCourses() {
@@ -31,10 +35,14 @@ export default function StudentCourses() {
   const [currentLesson, setCurrentLesson] = useState(null);
   const [currentModuleTitle, setCurrentModuleTitle] = useState('');
   const [loading, setLoading] = useState(true);
+  const [selectedEnrollmentIndex, setSelectedEnrollmentIndex] = useState(0);
 
-  const activeEnrollment = student?.enrollments?.[0];
+  const enrollments = student?.enrollments || [];
+  const activeEnrollment = enrollments[selectedEnrollmentIndex] || enrollments[0];
   const activeCourse = activeEnrollment?.course;
   const activeClass = activeEnrollment?.class;
+  const isCourseCompleted = activeEnrollment?.status === 'concluido' || 
+    (typeof activeEnrollment?.final_grade === 'string' && activeEnrollment?.final_grade.toUpperCase().includes('APROVADO'));
 
   useEffect(() => {
     async function loadCourseAndProgress() {
@@ -150,13 +158,121 @@ export default function StudentCourses() {
       <StudentSidebar />
 
       <main style={{ flex: 1, marginLeft: '240px', padding: '1.75rem 2rem', minWidth: 0, overflowY: 'auto' }}>
+        {/* Seletor de Cursos caso esteja matriculado em mais de um */}
+        {enrollments.length > 1 && (
+          <div style={{ display: 'flex', gap: '0.65rem', overflowX: 'auto', marginBottom: '1.25rem', paddingBottom: '0.35rem' }}>
+            {enrollments.map((enr, idx) => (
+              <button
+                key={enr.id || idx}
+                onClick={() => setSelectedEnrollmentIndex(idx)}
+                style={{
+                  padding: '0.55rem 0.95rem',
+                  borderRadius: '6px',
+                  border: idx === selectedEnrollmentIndex ? '1px solid #00C7FD' : '1px solid rgba(0, 163, 224, 0.25)',
+                  background: idx === selectedEnrollmentIndex ? 'rgba(0, 199, 253, 0.18)' : 'rgba(0, 24, 48, 0.65)',
+                  color: idx === selectedEnrollmentIndex ? '#FFFFFF' : '#94A3B8',
+                  fontWeight: idx === selectedEnrollmentIndex ? '700' : '500',
+                  cursor: 'pointer',
+                  fontSize: '0.825rem',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.4rem'
+                }}
+              >
+                <BookOpen size={14} color={idx === selectedEnrollmentIndex ? '#00C7FD' : '#94A3B8'} />
+                <span>{enr.course?.title || 'Curso'}</span>
+                {enr.status === 'concluido' && (
+                  <span className="badge badge-success" style={{ fontSize: '0.65rem', padding: '0.1rem 0.4rem' }}>Concluído</span>
+                )}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* BANNER OFICIAL DE CURSO CONCLUÍDO & CERTIFICADO EMITIDO */}
+        {isCourseCompleted && (
+          <div style={{
+            background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.2) 0%, rgba(0, 199, 253, 0.12) 100%)',
+            border: '1.5px solid #10B981',
+            borderRadius: '8px',
+            padding: '1.25rem 1.5rem',
+            marginBottom: '1.5rem',
+            boxShadow: '0 4px 18px rgba(16, 185, 129, 0.15)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: '1rem'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem', flex: '1 1 300px' }}>
+              <div style={{
+                width: '44px',
+                height: '44px',
+                borderRadius: '8px',
+                background: 'rgba(16, 185, 129, 0.25)',
+                border: '1px solid #10B981',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0
+              }}>
+                <Award size={24} color="#34D399" />
+              </div>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.2rem' }}>
+                  <span className="badge badge-success" style={{ fontSize: '0.7rem' }}>
+                    Formação Concluída & Aprovada
+                  </span>
+                  {activeEnrollment?.final_grade && (
+                    <span style={{ fontSize: '0.74rem', color: '#6EE7B7' }}>
+                      • {activeEnrollment.final_grade}
+                    </span>
+                  )}
+                </div>
+                <p style={{ color: '#D1FAE5', fontSize: '0.885rem', lineHeight: 1.5, margin: 0, fontWeight: '600' }}>
+                  “Este curso já foi concluído. O seu certificado foi emitido. Para continuar os seus estudos, solicite uma nova matrícula noutro curso ou atualize o seu percurso académico.”
+                </p>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', flexWrap: 'wrap' }}>
+              <Link
+                to="/estudante/certificados"
+                className="btn btn-primary btn-sm"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+              >
+                <Award size={14} />
+                <span>Ver Meu Certificado</span>
+              </Link>
+              <Link
+                to="/estudante/atualizar-curso"
+                className="btn btn-secondary btn-sm"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+              >
+                <RotateCcw size={14} />
+                <span>Atualizar Percurso</span>
+              </Link>
+            </div>
+          </div>
+        )}
+
         {/* Cabeçalho do Curso */}
         <div className="glass-card" style={{ padding: 'clamp(1.15rem, 3.5vw, 1.75rem)', marginBottom: '1.5rem' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem', marginBottom: '0.85rem' }}>
             <div>
-              <span style={{ fontSize: '0.72rem', color: '#00C7FD', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                FORMAÇÃO ACADÉMICA
-              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '0.72rem', color: '#00C7FD', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  FORMAÇÃO ACADÉMICA
+                </span>
+                <Link
+                  to="/estudante/atualizar-curso"
+                  className="btn btn-outline btn-sm"
+                  style={{ fontSize: '0.72rem', padding: '0.15rem 0.55rem', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+                >
+                  <RotateCcw size={12} />
+                  <span>Atualizar Curso</span>
+                </Link>
+              </div>
               <h1 style={{ fontSize: 'clamp(1.35rem, 4.5vw, 1.85rem)', fontWeight: '800', color: '#FFFFFF', marginTop: '0.2rem', lineHeight: 1.25 }}>
                 {displayCourse?.title || (loading ? 'Carregando curso...' : 'Nenhum curso matriculado')}
               </h1>

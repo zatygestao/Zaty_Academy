@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useSettings } from '../../context/SettingsContext';
 import { getAdminDashboardStats, getPayments, getPasswordResetHistory } from '../../services/api';
+import { subscribeToCourseUpdates } from '../../services/realtimeService';
 import AdminSidebar from '../../components/admin/AdminSidebar';
 import PaymentReviewModal from '../../components/admin/PaymentReviewModal';
 import OnlineStudentsModal from '../../components/admin/OnlineStudentsModal';
@@ -21,7 +22,9 @@ import {
   FileText,
   ArrowRight,
   ExternalLink,
-  Settings
+  Settings,
+  RotateCcw,
+  X
 } from 'lucide-react';
 
 export default function AdminDashboard() {
@@ -51,6 +54,7 @@ export default function AdminDashboard() {
   const [selectedPayment, setSelectedPayment] = useState(null);
   const [isOnlineModalOpen, setIsOnlineModalOpen] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [liveCourseUpdateAlert, setLiveCourseUpdateAlert] = useState(null);
 
   const loadData = async () => {
     try {
@@ -72,11 +76,23 @@ export default function AdminDashboard() {
   useEffect(() => {
     loadData();
 
+    // Inscrição em tempo real para atualizações de cursos de estudantes
+    const unsubscribeCourseUpdates = subscribeToCourseUpdates((payload) => {
+      // Atualiza métricas e dados instantaneamente
+      loadData();
+      if (payload) {
+        setLiveCourseUpdateAlert(payload);
+      }
+    });
+
     // Atualização automática ao retornar o foco ou quando houver alterações em outras abas
     const handleFocus = () => loadData();
     window.addEventListener('focus', handleFocus);
     window.addEventListener('storage', handleFocus);
     return () => {
+      if (typeof unsubscribeCourseUpdates === 'function') {
+        unsubscribeCourseUpdates();
+      }
       window.removeEventListener('focus', handleFocus);
       window.removeEventListener('storage', handleFocus);
     };
@@ -102,6 +118,64 @@ export default function AdminDashboard() {
             VER TODOS OS PAGAMENTOS
           </Link>
         </div>
+
+        {/* ALERTA EM TEMPO REAL: ATUALIZAÇÃO DE CURSO POR ESTUDANTE */}
+        {liveCourseUpdateAlert && (
+          <div style={{
+            background: 'linear-gradient(135deg, rgba(0, 114, 206, 0.25) 0%, rgba(0, 199, 253, 0.15) 100%)',
+            border: '1.5px solid #00C7FD',
+            borderRadius: '8px',
+            padding: '1rem 1.25rem',
+            marginBottom: '1.5rem',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '1rem',
+            boxShadow: '0 4px 20px rgba(0, 199, 253, 0.25)',
+            animation: 'fadeIn 0.3s ease-in-out'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
+              <div style={{
+                width: '42px',
+                height: '42px',
+                borderRadius: '8px',
+                background: '#00C7FD',
+                color: '#001428',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontWeight: '900',
+                flexShrink: 0
+              }}>
+                <RotateCcw size={22} />
+              </div>
+              <div>
+                <div style={{ color: '#00C7FD', fontWeight: '800', fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  Atualização de Curso em Tempo Real
+                </div>
+                <div style={{ color: '#FFFFFF', fontWeight: '600', fontSize: '0.95rem', marginTop: '0.15rem' }}>
+                  O estudante <strong>{liveCourseUpdateAlert.studentName || 'Estudante'}</strong> atualizou de <em>{liveCourseUpdateAlert.previousCourseTitle || 'Curso anterior'}</em> para <strong>{liveCourseUpdateAlert.newCourseTitle || 'Novo curso'}</strong>.
+                </div>
+                <div style={{ color: '#94A3B8', fontSize: '0.8rem', marginTop: '0.2rem' }}>
+                  Estado: <span style={{ color: '#38BDF8', fontWeight: '700' }}>{liveCourseUpdateAlert.status || 'pendente_turma'}</span> • Aguardando alocação de turma pela administração.
+                </div>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: '0.65rem', alignItems: 'center', flexShrink: 0 }}>
+              <Link to="/admin/estudantes" className="btn btn-primary btn-sm">
+                Ver Estudantes
+              </Link>
+              <button 
+                type="button" 
+                onClick={() => setLiveCourseUpdateAlert(null)}
+                style={{ background: 'transparent', border: 'none', color: '#94A3B8', cursor: 'pointer', padding: '0.25rem', display: 'flex', alignItems: 'center' }}
+                title="Fechar alerta"
+              >
+                <X size={18} />
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* BANNER DE INSCRIÇÕES ABERTAS - STATUS ADMINISTRATIVO */}
         {(() => {

@@ -14,7 +14,8 @@ import {
   ChevronRight,
   Newspaper,
   FileText,
-  MessageSquare
+  MessageSquare,
+  RotateCcw
 } from 'lucide-react';
 
 export default function StudentSidebar() {
@@ -50,6 +51,7 @@ export default function StudentSidebar() {
       groupTitle: 'Académico',
       items: [
         { label: 'Meus cursos', path: '/estudante/cursos', icon: BookOpen },
+        { label: 'Atualizar curso', path: '/estudante/atualizar-curso', icon: RotateCcw },
         { label: 'Notas & Avaliações', path: '/estudante/notas', icon: GraduationCap },
         { label: 'Trabalhos', path: '/estudante/trabalhos', icon: FileText },
         { label: 'Chat & Suporte', path: '/estudante/chat', icon: MessageSquare },

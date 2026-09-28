@@ -185,8 +185,68 @@ export default function StudentDashboard() {
           </div>
         )}
 
-        {/* 1. Alerta de Inscrição Aprovada com Acesso Liberado */}
-        {(student?.enrollment_status === 'ativo' || student?.status === 'ativo') && (
+        {/* 0. Alerta de Curso Concluído & Certificado Emitido */}
+        {(student?.enrollment_status === 'concluido' || activeEnrollment?.status === 'concluido' || (typeof activeEnrollment?.final_grade === 'string' && activeEnrollment?.final_grade.toUpperCase().includes('APROVADO'))) && (
+          <div style={{
+            background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.22) 0%, rgba(0, 199, 253, 0.15) 100%)',
+            border: '2px solid #10B981',
+            borderRadius: '10px',
+            padding: '1.4rem',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: '1rem',
+            marginBottom: '1.5rem',
+            boxShadow: '0 4px 20px rgba(16, 185, 129, 0.2)'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flex: '1 1 300px' }}>
+              <div style={{
+                width: '48px',
+                height: '48px',
+                borderRadius: '10px',
+                background: 'rgba(16, 185, 129, 0.3)',
+                border: '1.5px solid #10B981',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0
+              }}>
+                <Award size={26} color="#34D399" />
+              </div>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  <strong style={{ color: '#FFFFFF', fontSize: '1.05rem' }}>Curso Concluído & Certificado Emitido!</strong>
+                  <span className="badge badge-success" style={{ fontSize: '0.7rem' }}>Aprovado com Êxito</span>
+                </div>
+                <p style={{ color: '#D1FAE5', fontSize: '0.885rem', marginTop: '0.25rem', lineHeight: '1.5', fontWeight: '500' }}>
+                  “Este curso já foi concluído. O seu certificado foi emitido. Para continuar os seus estudos, solicite uma nova matrícula noutro curso ou atualize o seu percurso académico.”
+                </p>
+              </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', flexWrap: 'wrap' }}>
+              <Link 
+                to="/estudante/certificados" 
+                className="btn btn-primary" 
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem', padding: '0.55rem 1rem' }}
+              >
+                <Award size={16} />
+                <span>Ver Meu Certificado</span>
+              </Link>
+              <Link 
+                to="/estudante/atualizar-curso" 
+                className="btn btn-secondary" 
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem', padding: '0.55rem 1rem' }}
+              >
+                <span>Atualizar Percurso</span>
+                <ArrowRight size={16} />
+              </Link>
+            </div>
+          </div>
+        )}
+
+        {/* 1. Alerta de Inscrição Aprovada com Acesso Liberado (Apenas se não for concluído) */}
+        {student?.enrollment_status !== 'concluido' && activeEnrollment?.status !== 'concluido' && !(typeof activeEnrollment?.final_grade === 'string' && activeEnrollment?.final_grade.toUpperCase().includes('APROVADO')) && (student?.enrollment_status === 'ativo' || student?.status === 'ativo') && (
           <div style={{
             background: 'linear-gradient(90deg, rgba(16, 185, 129, 0.18) 0%, rgba(0, 199, 253, 0.12) 100%)',
             border: '1px solid rgba(16, 185, 129, 0.45)',
