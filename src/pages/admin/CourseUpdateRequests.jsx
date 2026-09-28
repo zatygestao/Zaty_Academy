@@ -27,7 +27,8 @@ import {
   ChevronRight,
   RefreshCw,
   Sparkles,
-  Info
+  Info,
+  ExternalLink
 } from 'lucide-react';
 
 export default function CourseUpdateRequests() {
@@ -53,7 +54,20 @@ export default function CourseUpdateRequests() {
     else setRefreshing(true);
     try {
       const data = await getCourseUpdateRequests();
-      setRequests(data || []);
+      // Deduplicação rigorosa no frontend: 1 registo exclusivo por estudante + novo curso
+      const uniqueMap = new Map();
+      (data || []).forEach(r => {
+        const pairKey = `${r.student_id}_${r.new_course_id}`;
+        if (!uniqueMap.has(pairKey)) {
+          uniqueMap.set(pairKey, r);
+        } else {
+          const current = uniqueMap.get(pairKey);
+          if (new Date(r.updated_at || r.created_at || 0) >= new Date(current.updated_at || current.created_at || 0)) {
+            uniqueMap.set(pairKey, r);
+          }
+        }
+      });
+      setRequests(Array.from(uniqueMap.values()));
     } catch (err) {
       console.error('Erro ao carregar solicitações de atualização de curso:', err);
     } finally {
@@ -101,6 +115,9 @@ export default function CourseUpdateRequests() {
     if (decision === 'rejeitar' && !rejectionReason.trim()) {
       return setErrorMsg('Por favor, informe o motivo institucional da rejeição.');
     }
+    if (decision === 'rejeitar_pagamento' && !adminNotes.trim()) {
+      return setErrorMsg('Por favor, informe o motivo da não validação do comprovativo para orientar o estudante.');
+    }
 
     setSubmittingDecision(true);
     setErrorMsg('');
@@ -118,9 +135,11 @@ export default function CourseUpdateRequests() {
 
       setSuccessMsg(
         decision === 'aprovar' 
-          ? (Number(selectedRequest.new_course_price) > 0 ? 'Solicitação aprovada! Aguardando confirmação do pagamento.' : 'Solicitação aprovada e acesso liberado com sucesso!')
+          ? (Number(selectedRequest.new_course_price) > 0 ? 'Solicitação aprovada! Aguardando envio de comprovativo do estudante.' : 'Solicitação aprovada e acesso liberado com sucesso!')
           : decision === 'confirmar_pagamento_e_ativar'
-          ? 'Pagamento confirmado! Acesso total ao curso liberado para o estudante.'
+          ? 'Pagamento confirmado! Matrícula no novo curso ativada com sucesso.'
+          : decision === 'rejeitar_pagamento'
+          ? 'Comprovativo rejeitado. O estudante foi notificado para reenviar no módulo.'
           : 'Solicitação rejeitada com sucesso.'
       );
 
@@ -155,19 +174,30 @@ export default function CourseUpdateRequests() {
     return matchesStatus && matchesSearch;
   });
 
-  const getStatusBadge = (status) => {
-    switch (status) {
+  const getStatusBadge = (req) => {
+    switch (req.status) {
       case 'pendente':
       case 'em_analise':
         return <span className="badge badge-warning" style={{ fontSize: '0.72rem' }}>Pendente</span>;
       case 'aprovada_aguardando_pagamento':
-        return <span className="badge badge-primary" style={{ fontSize: '0.72rem' }}>Aprovada (Aguardando Pagamento)</span>;
+        if (req.payment_status === 'em_analise') {
+          return (
+            <span className="badge badge-info" style={{ fontSize: '0.72rem', display: 'inline-flex', alignItems: 'center', gap: '0.3rem', background: 'rgba(0, 199, 253, 0.2)', border: '1px solid #00C7FD', color: '#BAE6FD' }}>
+              <CreditCard size={12} />
+              <span>Pagamento em Análise</span>
+            </span>
+          );
+        }
+        if (req.payment_status === 'rejeitado') {
+          return <span className="badge badge-danger" style={{ fontSize: '0.72rem' }}>Pagamento Rejeitado</span>;
+        }
+        return <span className="badge badge-primary" style={{ fontSize: '0.72rem' }}>Aguardando Pagamento</span>;
       case 'concluido':
         return <span className="badge badge-success" style={{ fontSize: '0.72rem' }}>Concluída / Acesso Ativo</span>;
       case 'rejeitada':
         return <span className="badge badge-danger" style={{ fontSize: '0.72rem' }}>Rejeitada</span>;
       default:
-        return <span className="badge badge-secondary" style={{ fontSize: '0.72rem' }}>{status}</span>;
+        return <span className="badge badge-secondary" style={{ fontSize: '0.72rem' }}>{req.status}</span>;
     }
   };
 
@@ -399,9 +429,14 @@ export default function CourseUpdateRequests() {
                           <strong style={{ color: '#34D399', display: 'block' }}>
                             {req.new_course_title}
                           </strong>
-                          <span style={{ color: '#94A3B8', fontSize: '0.74rem' }}>
+                          <span style={{ color: '#94A3B8', fontSize: '0.74rem', display: 'block' }}>
                             Valor: {Number(req.new_course_price) > 0 ? formatCurrency(req.new_course_price) : 'Gratuito / Isento'}
                           </span>
+                          {req.payment_reference_code && (
+                            <span style={{ color: '#00C7FD', fontSize: '0.72rem', display: 'block', marginTop: '0.15rem' }}>
+                              Ref: {req.payment_reference_code} {req.payment_method ? `(${req.payment_method.toUpperCase()})` : ''}
+                            </span>
+                          )}
                         </td>
 
                         {/* Data e Hora */}
@@ -413,7 +448,7 @@ export default function CourseUpdateRequests() {
 
                         {/* Estado */}
                         <td style={{ padding: '0.9rem 1rem' }}>
-                          {getStatusBadge(req.status)}
+                          {getStatusBadge(req)}
                         </td>
 
                         {/* Ações */}
@@ -447,10 +482,15 @@ export default function CourseUpdateRequests() {
                                 type="button"
                                 onClick={() => handleOpenReviewModal(req, 'confirm_payment')}
                                 className="btn btn-primary btn-sm"
-                                style={{ fontSize: '0.75rem', padding: '0.3rem 0.65rem', background: 'linear-gradient(135deg, #10B981, #059669)', borderColor: '#10B981' }}
+                                style={{
+                                  fontSize: '0.75rem',
+                                  padding: '0.3rem 0.65rem',
+                                  background: req.payment_status === 'em_analise' ? 'linear-gradient(135deg, #10B981, #059669)' : 'rgba(0, 114, 206, 0.7)',
+                                  borderColor: req.payment_status === 'em_analise' ? '#10B981' : '#00C7FD'
+                                }}
                               >
                                 <CreditCard size={13} />
-                                <span>Confirmar Pagamento</span>
+                                <span>{req.payment_status === 'em_analise' ? 'Validar Pagamento' : 'Confirmar Pagamento'}</span>
                               </button>
                             )}
 
@@ -664,23 +704,69 @@ export default function CourseUpdateRequests() {
                     Ao confirmar o pagamento da formação ({formatCurrency(selectedRequest?.new_course_price)}), a matrícula anterior será arquivada como "Transferido" e a nova formação será <strong>imediatamente ativada</strong>. O estudante receberá a notificação oficial com acesso total liberado.
                   </div>
 
+                  {/* Informações do Pagamento Submetido pelo Estudante */}
+                  <div style={{ background: 'rgba(0, 18, 36, 0.8)', border: '1px solid rgba(0, 199, 253, 0.3)', borderRadius: '6px', padding: '0.9rem', marginBottom: '1.15rem', fontSize: '0.82rem' }}>
+                    <span style={{ color: '#00C7FD', fontWeight: '700', textTransform: 'uppercase', fontSize: '0.72rem', display: 'block', marginBottom: '0.5rem' }}>
+                      Dados do Pagamento Informados pelo Estudante
+                    </span>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.75rem' }}>
+                      <div>
+                        <span style={{ color: '#94A3B8', fontSize: '0.72rem' }}>Método:</span>
+                        <strong style={{ color: '#FFFFFF', display: 'block' }}>{selectedRequest?.payment_method?.toUpperCase() || 'M-Pesa / Carteira'}</strong>
+                      </div>
+                      <div>
+                        <span style={{ color: '#94A3B8', fontSize: '0.72rem' }}>Referência / Transação:</span>
+                        <strong style={{ color: '#38BDF8', display: 'block', fontFamily: 'monospace' }}>{selectedRequest?.payment_reference_code || 'Não indicada'}</strong>
+                      </div>
+                      <div>
+                        <span style={{ color: '#94A3B8', fontSize: '0.72rem' }}>Valor a Liquidar:</span>
+                        <strong style={{ color: '#10B981', display: 'block' }}>{formatCurrency(selectedRequest?.new_course_price)}</strong>
+                      </div>
+                    </div>
+
+                    {selectedRequest?.payment_proof_url && (
+                      <div style={{ marginTop: '0.75rem', paddingTop: '0.65rem', borderTop: '1px solid rgba(0, 163, 224, 0.2)' }}>
+                        <a
+                          href={selectedRequest.payment_proof_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="btn btn-outline btn-sm"
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.78rem' }}
+                        >
+                          <ExternalLink size={14} />
+                          <span>Visualizar Comprovativo ({selectedRequest.payment_proof_file_name || 'Abrir Recibo'})</span>
+                        </a>
+                      </div>
+                    )}
+                  </div>
+
                   <div className="form-group" style={{ marginBottom: '1.25rem' }}>
                     <label className="form-label" style={{ fontSize: '0.82rem' }}>
-                      Nota Financeira ou Recibo (Opcional)
+                      Nota Financeira ou Motivo de Não Aceitação
                     </label>
                     <input
                       type="text"
                       value={adminNotes}
                       onChange={(e) => setAdminNotes(e.target.value)}
-                      placeholder="Ex: Liquidado via M-Pesa ref. 84930128"
+                      placeholder="Ex: Liquidado via M-Pesa ref. 84930128 (ou motivo caso vá rejeitar)"
                       className="form-input"
                       style={{ fontSize: '0.85rem' }}
                     />
                   </div>
 
-                  <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
+                  <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
                     <button type="button" onClick={handleCloseModal} className="btn btn-secondary" disabled={submittingDecision}>
                       Cancelar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleExecuteDecision('rejeitar_pagamento')}
+                      className="btn btn-secondary"
+                      style={{ color: '#FCA5A5', borderColor: 'rgba(239, 68, 68, 0.4)' }}
+                      disabled={submittingDecision}
+                    >
+                      <Ban size={14} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '4px' }} />
+                      <span>Rejeitar Comprovativo</span>
                     </button>
                     <button
                       type="button"

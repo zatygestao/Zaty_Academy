@@ -8,10 +8,13 @@ import {
   getStudentCoursesEligibility, 
   requestStudentCourseUpdate,
   getStudentCourseUpdateRequests,
-  checkStudentCourseEnrollmentEligibility 
+  getStudentCourseUpdateEligibility,
+  submitCourseUpdatePaymentProof,
+  uploadPrivateDocument
 } from '../../services/api';
 import { subscribeToCourseUpdates } from '../../services/realtimeService';
 import { formatDate, formatDateTime, formatCurrency } from '../../utils/formatters';
+import { validateFile } from '../../utils/validators';
 import { 
   RotateCcw, 
   BookOpen, 
@@ -28,7 +31,12 @@ import {
   ChevronRight,
   Info,
   CreditCard,
-  Ban
+  Ban,
+  Upload,
+  Lock,
+  ExternalLink,
+  Check,
+  GraduationCap
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
@@ -38,16 +46,26 @@ export default function StudentCourseUpdate() {
 
   const [courses, setCourses] = useState([]);
   const [eligibilityMap, setEligibilityMap] = useState({});
+  const [updateEligibility, setUpdateEligibility] = useState(null);
   const [activeRequest, setActiveRequest] = useState(null);
   const [requestHistory, setRequestHistory] = useState([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [successBanner, setSuccessBanner] = useState('');
   const [reason, setReason] = useState('');
   const [selectedCourseId, setSelectedCourseId] = useState('');
-  const [justSubmitted, setJustSubmitted] = useState(false);
 
-  // Relógio em tempo real para exibir a data e hora exata
+  // Formulário de Pagamento no Módulo
+  const [paymentMethod, setPaymentMethod] = useState('mpesa');
+  const [referenceCode, setReferenceCode] = useState('');
+  const [paymentNotes, setPaymentNotes] = useState('');
+  const [proofFile, setProofFile] = useState(null);
+  const [proofPreview, setProofPreview] = useState(null);
+  const [submittingPayment, setSubmittingPayment] = useState(false);
+  const [showPaymentForm, setShowPaymentForm] = useState(false);
+
+  // Relógio em tempo real
   const [currentTimestamp, setCurrentTimestamp] = useState(new Date());
 
   useEffect(() => {
@@ -78,24 +96,34 @@ export default function StudentCourseUpdate() {
         setCurrentCourseData(activeCrs);
       }
 
-      // 2. Carregar catálogo e mapa de elegibilidade passando currentCourseId
-      const [crs, reqs] = await Promise.all([
+      // 2. Verificar elegibilidade central e solicitações ativas
+      const [crs, reqs, eligCheck] = await Promise.all([
         getCourses(true),
-        getStudentCourseUpdateRequests(student.id)
+        getStudentCourseUpdateRequests(student.id),
+        getStudentCourseUpdateEligibility(student.id)
       ]);
 
       const currentCourseId = activeCrs?.id || activeEnr?.course_id || null;
-      const elig = await getStudentCoursesEligibility(student.id, { currentCourseId });
+      const eligMap = await getStudentCoursesEligibility(student.id, { currentCourseId });
 
       setCourses(crs || []);
-      setEligibilityMap(elig || {});
+      setEligibilityMap(eligMap || {});
       setRequestHistory(reqs || []);
+      setUpdateEligibility(eligCheck || null);
 
-      // Procura requisição ativa (pendente ou aguardando pagamento)
+      // Identificar solicitação ativa (pendente, em análise ou aguardando pagamento)
       const pendingReq = (reqs || []).find(r => 
         ['pendente', 'em_analise', 'aprovada_aguardando_pagamento'].includes(r.status)
       );
       setActiveRequest(pendingReq || null);
+
+      if (pendingReq?.status === 'aprovada_aguardando_pagamento') {
+        if (pendingReq.payment_status === 'rejeitado' || pendingReq.payment_status === 'pendente') {
+          setShowPaymentForm(true);
+        } else {
+          setShowPaymentForm(false);
+        }
+      }
     } catch (err) {
       console.error('Erro ao carregar dados de atualização de curso:', err);
       setErrorMsg('Falha ao carregar informações de percurso académico.');
@@ -107,7 +135,7 @@ export default function StudentCourseUpdate() {
   useEffect(() => {
     loadData();
 
-    // Escuta em tempo real atualizações do Admin
+    // Escuta em tempo real atualizações da Direção
     const sub = subscribeToCourseUpdates(() => {
       loadData();
       if (refreshProfile) refreshProfile();
@@ -120,6 +148,7 @@ export default function StudentCourseUpdate() {
 
   const selectedCourseData = courses.find(c => c.id === selectedCourseId);
 
+  // Submissão de nova solicitação de atualização
   const handleConfirmSubmit = async (e) => {
     e.preventDefault();
     if (!selectedCourseId) {
@@ -136,6 +165,7 @@ export default function StudentCourseUpdate() {
 
     setSubmitting(true);
     setErrorMsg('');
+    setSuccessBanner('');
 
     try {
       const newReq = await requestStudentCourseUpdate({
@@ -146,15 +176,12 @@ export default function StudentCourseUpdate() {
       });
 
       setActiveRequest(newReq);
-      setJustSubmitted(true);
       setSelectedCourseId('');
       setReason('');
+      setSuccessBanner('A sua solicitação de atualização foi submetida com sucesso e aguarda avaliação da Direção.');
 
       await loadData();
-
-      if (refreshProfile) {
-        await refreshProfile();
-      }
+      if (refreshProfile) await refreshProfile();
 
       try {
         confetti({
@@ -170,6 +197,80 @@ export default function StudentCourseUpdate() {
       setSubmitting(false);
     }
   };
+
+  // Upload e Seleção de Ficheiro de Comprovativo
+  const handleFileChange = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const val = validateFile(file, { maxSizeMB: 10, allowedTypes: ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'] });
+    if (!val.valid) {
+      setErrorMsg(val.error);
+      return;
+    }
+
+    setProofFile(file);
+    if (file.type.startsWith('image/')) {
+      setProofPreview(URL.createObjectURL(file));
+    } else {
+      setProofPreview(null);
+    }
+    setErrorMsg('');
+  };
+
+  // Submissão do Comprovativo de Pagamento no Próprio Módulo
+  const handlePaymentSubmit = async (e) => {
+    e.preventDefault();
+    if (!activeRequest) return;
+    if (!referenceCode.trim()) {
+      return setErrorMsg('Por favor informe a referência, número ou código do recibo de pagamento.');
+    }
+
+    setSubmittingPayment(true);
+    setErrorMsg('');
+    setSuccessBanner('');
+
+    try {
+      await submitCourseUpdatePaymentProof({
+        requestId: activeRequest.id,
+        studentId: student.id,
+        amount: activeRequest.new_course_price,
+        paymentMethod,
+        referenceCode: referenceCode.trim(),
+        proofFile,
+        notes: paymentNotes.trim()
+      });
+
+      setProofFile(null);
+      setProofPreview(null);
+      setReferenceCode('');
+      setPaymentNotes('');
+      setShowPaymentForm(false);
+      setSuccessBanner('Comprovativo de pagamento submetido com sucesso! A Direção Financeira foi notificada para validação.');
+
+      await loadData();
+      if (refreshProfile) await refreshProfile();
+
+      try {
+        confetti({
+          particleCount: 80,
+          spread: 60,
+          origin: { y: 0.6 }
+        });
+      } catch (_) {}
+    } catch (err) {
+      console.error('Erro ao submeter comprovativo de pagamento:', err);
+      setErrorMsg(err.message || 'Falha ao submeter comprovativo de pagamento.');
+    } finally {
+      setSubmittingPayment(false);
+    }
+  };
+
+  // Determinar visualização principal
+  const hasPendingRequest = activeRequest && (activeRequest.status === 'pendente' || activeRequest.status === 'em_analise');
+  const hasAwaitingPayment = activeRequest && activeRequest.status === 'aprovada_aguardando_pagamento';
+  const isLockedByActiveCourse = !activeRequest && (!updateEligibility?.canRequestUpdate && updateEligibility?.reason === 'curso_em_andamento');
+  const isFormEligible = !activeRequest && (updateEligibility?.canRequestUpdate || false);
 
   return (
     <div className="sidebar-layout" style={{ display: 'flex', minHeight: 'calc(100vh - 64px)' }}>
@@ -194,6 +295,25 @@ export default function StudentCourseUpdate() {
           </p>
         </div>
 
+        {/* FEEDBACK DE SUCESSO */}
+        {successBanner && (
+          <div style={{
+            padding: '1rem 1.25rem',
+            borderRadius: '8px',
+            background: 'rgba(16, 185, 129, 0.15)',
+            border: '1.5px solid #10B981',
+            color: '#A7F3D0',
+            fontSize: '0.885rem',
+            marginBottom: '1.5rem',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.65rem'
+          }}>
+            <CheckCircle2 size={20} color="#10B981" style={{ flexShrink: 0 }} />
+            <span>{successBanner}</span>
+          </div>
+        )}
+
         {/* FEEDBACK DE ERRO */}
         {errorMsg && (
           <div style={{
@@ -213,8 +333,8 @@ export default function StudentCourseUpdate() {
           </div>
         )}
 
-        {/* CENÁRIO 1: O ESTUDANTE TEM UMA SOLICITAÇÃO PENDENTE DE AVALIAÇÃO */}
-        {activeRequest && (activeRequest.status === 'pendente' || activeRequest.status === 'em_analise') && (
+        {/* CENÁRIO 1: SOLICITAÇÃO PENDENTE DE AVALIAÇÃO */}
+        {hasPendingRequest && (
           <div style={{
             background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.18) 0%, rgba(0, 24, 48, 0.9) 100%)',
             border: '2px solid #F59E0B',
@@ -248,7 +368,7 @@ export default function StudentCourseUpdate() {
             </div>
 
             <p style={{ color: '#FEF3C7', fontSize: '0.9rem', lineHeight: 1.5, marginBottom: '1.25rem' }}>
-              A sua solicitação para o curso <strong>"{activeRequest.new_course_title}"</strong> foi recebida em <strong>{formatDateTime(activeRequest.created_at)}</strong> e encontra-se sob avaliação da Direção Académica. Enquanto estiver sob análise, não é permitido o envio de novos pedidos duplicados.
+              A sua solicitação para o curso <strong>"{activeRequest.new_course_title}"</strong> foi recebida em <strong>{formatDateTime(activeRequest.created_at)}</strong> e encontra-se sob avaliação da Direção Académica. O formulário de seleção permanecerá encerrado até à conclusão desta avaliação.
             </p>
 
             {/* TABELA DE DETALHES DO PEDIDO PENDENTE */}
@@ -263,14 +383,14 @@ export default function StudentCourseUpdate() {
               fontSize: '0.825rem'
             }}>
               <div>
-                <span style={{ color: '#94A3B8', fontSize: '0.72rem', textTransform: 'uppercase' }}>Curso Atual</span>
+                <span style={{ color: '#94A3B8', fontSize: '0.72rem', textTransform: 'uppercase' }}>Curso Anterior / Atual</span>
                 <strong style={{ color: '#CBD5E1', display: 'block', fontSize: '0.9rem', marginTop: '0.15rem' }}>
                   {activeRequest.previous_course_title || 'Sem curso anterior'}
                 </strong>
               </div>
 
               <div>
-                <span style={{ color: '#94A3B8', fontSize: '0.72rem', textTransform: 'uppercase' }}>Novo Curso Pretendido</span>
+                <span style={{ color: '#94A3B8', fontSize: '0.72rem', textTransform: 'uppercase' }}>Novo Curso Solicitado</span>
                 <strong style={{ color: '#F59E0B', display: 'block', fontSize: '0.95rem', marginTop: '0.15rem' }}>
                   {activeRequest.new_course_title}
                 </strong>
@@ -287,10 +407,10 @@ export default function StudentCourseUpdate() {
               </div>
 
               <div>
-                <span style={{ color: '#94A3B8', fontSize: '0.72rem', textTransform: 'uppercase' }}>Estado do Pedido</span>
+                <span style={{ color: '#94A3B8', fontSize: '0.72rem', textTransform: 'uppercase' }}>Estado Oficial</span>
                 <div style={{ marginTop: '0.2rem' }}>
                   <span className="badge badge-warning" style={{ fontSize: '0.72rem' }}>
-                    Pendente
+                    Pendente de Avaliação
                   </span>
                 </div>
               </div>
@@ -298,7 +418,7 @@ export default function StudentCourseUpdate() {
 
             {activeRequest.reason && (
               <div style={{ marginTop: '1rem', color: '#CBD5E1', fontSize: '0.82rem' }}>
-                <span style={{ color: '#94A3B8', textTransform: 'uppercase', fontSize: '0.72rem' }}>Sua Justificativa:</span>
+                <span style={{ color: '#94A3B8', textTransform: 'uppercase', fontSize: '0.72rem' }}>Justificativa Apresentada:</span>
                 <p style={{ margin: '0.2rem 0 0 0', fontStyle: 'italic' }}>"{activeRequest.reason}"</p>
               </div>
             )}
@@ -311,15 +431,15 @@ export default function StudentCourseUpdate() {
           </div>
         )}
 
-        {/* CENÁRIO 2: A SOLICITAÇÃO FOI APROVADA E ESTÁ AGUARDANDO PAGAMENTO */}
-        {activeRequest && activeRequest.status === 'aprovada_aguardando_pagamento' && (
+        {/* CENÁRIO 2: SOLICITAÇÃO APROVADA - PAGAMENTO DENTRO DO PRÓPRIO MÓDULO (REQUISITO 2) */}
+        {hasAwaitingPayment && (
           <div style={{
-            background: 'linear-gradient(135deg, rgba(14, 165, 233, 0.2) 0%, rgba(0, 24, 48, 0.95) 100%)',
+            background: 'linear-gradient(135deg, rgba(14, 165, 233, 0.22) 0%, rgba(0, 24, 48, 0.96) 100%)',
             border: '2px solid #00C7FD',
             borderRadius: '12px',
             padding: '1.75rem',
             marginBottom: '2rem',
-            boxShadow: '0 8px 24px rgba(0, 199, 253, 0.2)'
+            boxShadow: '0 8px 28px rgba(0, 199, 253, 0.25)'
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
               <div style={{
@@ -337,34 +457,37 @@ export default function StudentCourseUpdate() {
               </div>
               <div>
                 <span className="badge badge-primary" style={{ fontSize: '0.72rem', textTransform: 'uppercase' }}>
-                  Parecer Favorável da Direção
+                  Parecer Favorável da Direção Académica
                 </span>
                 <h2 style={{ fontSize: '1.4rem', fontWeight: '900', color: '#FFFFFF', margin: '0.2rem 0 0 0' }}>
-                  Solicitação Aprovada! Efetue o Pagamento para Liberar o Acesso
+                  Solicitação Aprovada! Efetue a Liquidação para Liberar o Curso
                 </h2>
               </div>
             </div>
 
             <p style={{ color: '#BAE6FD', fontSize: '0.9rem', lineHeight: 1.5, marginBottom: '1.25rem' }}>
-              A sua solicitação para o curso <strong>"{activeRequest.new_course_title}"</strong> foi <strong>aprovada pela Administração</strong>. Para concluir a transição pedagógica e liberar o acesso aos módulos, aulas e conteúdos, realize o pagamento da propina.
+              A sua solicitação de atualização para o curso <strong>"{activeRequest.new_course_title}"</strong> foi <strong>aprovada pela Direção</strong>. Para concluir a ativação do seu percurso e liberar o acesso total aos módulos, submeta o comprovativo de pagamento abaixo.
             </p>
 
-            {/* CARD DE DETALHES DE PAGAMENTO */}
+            {/* CARD COM VALOR E CONTAS OFICIAIS */}
             <div style={{
-              background: 'rgba(0, 18, 36, 0.85)',
+              background: 'rgba(0, 18, 36, 0.9)',
               borderRadius: '8px',
-              border: '1px solid rgba(0, 199, 253, 0.3)',
+              border: '1px solid rgba(0, 199, 253, 0.35)',
               padding: '1.25rem',
               marginBottom: '1.25rem'
             }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '1rem' }}>
                 <div>
-                  <span style={{ color: '#94A3B8', fontSize: '0.74rem', textTransform: 'uppercase' }}>Novo Curso</span>
-                  <strong style={{ color: '#FFFFFF', fontSize: '1.05rem', display: 'block' }}>{activeRequest.new_course_title}</strong>
+                  <span style={{ color: '#94A3B8', fontSize: '0.74rem', textTransform: 'uppercase' }}>Novo Curso Solicitado</span>
+                  <strong style={{ color: '#FFFFFF', fontSize: '1.1rem', display: 'block' }}>{activeRequest.new_course_title}</strong>
+                  <span style={{ color: '#00C7FD', fontSize: '0.76rem' }}>
+                    Carga: {activeRequest.new_course_workload || 60}h • {activeRequest.new_course_duration || '3 Meses'}
+                  </span>
                 </div>
                 <div style={{ textAlign: 'right' }}>
                   <span style={{ color: '#94A3B8', fontSize: '0.74rem', textTransform: 'uppercase' }}>Valor da Formação</span>
-                  <div style={{ fontSize: '1.45rem', fontWeight: '900', color: '#00C7FD' }}>
+                  <div style={{ fontSize: '1.6rem', fontWeight: '900', color: '#00C7FD' }}>
                     {formatCurrency(activeRequest.new_course_price)}
                   </div>
                 </div>
@@ -378,37 +501,330 @@ export default function StudentCourseUpdate() {
 
               {/* Contas Institucionais */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0.85rem', fontSize: '0.825rem' }}>
-                <div style={{ background: 'rgba(0, 24, 48, 0.75)', padding: '0.75rem', borderRadius: '6px' }}>
-                  <span style={{ color: '#EF4444', fontWeight: '700', display: 'block' }}>M-Pesa</span>
-                  <strong style={{ color: '#FFFFFF', fontSize: '0.95rem' }}>849 301 280</strong>
-                  <span style={{ color: '#94A3B8', fontSize: '0.72rem', display: 'block' }}>Zaty Academy</span>
+                <div style={{ background: 'rgba(0, 24, 48, 0.75)', padding: '0.75rem', borderRadius: '6px', border: '1px solid rgba(239, 68, 68, 0.25)' }}>
+                  <span style={{ color: '#EF4444', fontWeight: '700', display: 'block' }}>Vodacom M-Pesa</span>
+                  <strong style={{ color: '#FFFFFF', fontSize: '1rem' }}>849 301 280</strong>
+                  <span style={{ color: '#94A3B8', fontSize: '0.72rem', display: 'block' }}>Titular: Zaty Academy</span>
                 </div>
 
-                <div style={{ background: 'rgba(0, 24, 48, 0.75)', padding: '0.75rem', borderRadius: '6px' }}>
-                  <span style={{ color: '#F59E0B', fontWeight: '700', display: 'block' }}>E-Mola</span>
-                  <strong style={{ color: '#FFFFFF', fontSize: '0.95rem' }}>878 473 060</strong>
-                  <span style={{ color: '#94A3B8', fontSize: '0.72rem', display: 'block' }}>Zaty Academy</span>
+                <div style={{ background: 'rgba(0, 24, 48, 0.75)', padding: '0.75rem', borderRadius: '6px', border: '1px solid rgba(245, 158, 11, 0.25)' }}>
+                  <span style={{ color: '#F59E0B', fontWeight: '700', display: 'block' }}>Movitel e-Mola</span>
+                  <strong style={{ color: '#FFFFFF', fontSize: '1rem' }}>878 473 060</strong>
+                  <span style={{ color: '#94A3B8', fontSize: '0.72rem', display: 'block' }}>Titular: Zaty Academy</span>
                 </div>
 
-                <div style={{ background: 'rgba(0, 24, 48, 0.75)', padding: '0.75rem', borderRadius: '6px' }}>
+                <div style={{ background: 'rgba(0, 24, 48, 0.75)', padding: '0.75rem', borderRadius: '6px', border: '1px solid rgba(0, 199, 253, 0.25)' }}>
                   <span style={{ color: '#00C7FD', fontWeight: '700', display: 'block' }}>Millennium BIM</span>
-                  <strong style={{ color: '#FFFFFF', fontSize: '0.85rem' }}>Conta: 4001234567</strong>
+                  <strong style={{ color: '#FFFFFF', fontSize: '0.9rem' }}>Conta: 4001234567</strong>
                   <span style={{ color: '#94A3B8', fontSize: '0.72rem', display: 'block' }}>Titular: Zaty Academy</span>
                 </div>
               </div>
             </div>
 
-            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-              <Link to="/estudante/pagamentos" className="btn btn-primary" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}>
-                <CreditCard size={16} />
-                <span>Anexar Comprovativo de Pagamento</span>
+            {/* ESTADO DO COMPROVATIVO */}
+            {activeRequest.payment_status === 'em_analise' && !showPaymentForm && (
+              <div style={{
+                background: 'rgba(16, 185, 129, 0.15)',
+                border: '1.5px solid #10B981',
+                borderRadius: '8px',
+                padding: '1.25rem',
+                marginBottom: '1rem',
+                color: '#A7F3D0'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.75rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                    <CheckCircle2 size={24} color="#10B981" />
+                    <div>
+                      <h4 style={{ margin: 0, fontSize: '1rem', fontWeight: '800', color: '#FFFFFF' }}>
+                        Comprovativo Submetido com Sucesso
+                      </h4>
+                      <p style={{ margin: '0.2rem 0 0 0', fontSize: '0.825rem', color: '#D1FAE5' }}>
+                        O seu comprovativo (Ref: <strong>{activeRequest.payment_reference_code || 'Registada'}</strong>) está sob verificação da Secretaria Financeira. Assim que validado, o novo curso será ativado de imediato.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
+                    {activeRequest.payment_proof_url && (
+                      <a 
+                        href={activeRequest.payment_proof_url} 
+                        target="_blank" 
+                        rel="noreferrer" 
+                        className="btn btn-outline btn-sm"
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.75rem' }}
+                      >
+                        <ExternalLink size={13} />
+                        <span>Ver Recibo Anexado</span>
+                      </a>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setShowPaymentForm(true)}
+                      className="btn btn-secondary btn-sm"
+                      style={{ fontSize: '0.75rem' }}
+                    >
+                      Substituir Comprovativo
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* CASO O PAGAMENTO TENHA SIDO REJEITADO */}
+            {activeRequest.payment_status === 'rejeitado' && (
+              <div style={{
+                background: 'rgba(239, 68, 68, 0.18)',
+                border: '1.5px solid #EF4444',
+                borderRadius: '8px',
+                padding: '1rem 1.25rem',
+                marginBottom: '1.25rem',
+                color: '#FCA5A5',
+                fontSize: '0.85rem'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: '700', marginBottom: '0.35rem' }}>
+                  <AlertCircle size={18} color="#EF4444" />
+                  <span>Comprovativo de Pagamento Anterior Não Validado</span>
+                </div>
+                <p style={{ margin: 0, color: '#FEE2E2' }}>
+                  A Direção solicitou o reenvio de um comprovativo válido. Por favor anexe novamente abaixo a confirmação de liquidação.
+                </p>
+              </div>
+            )}
+
+            {/* FORMULÁRIO DE ENVIO DO COMPROVATIVO */}
+            {(showPaymentForm || activeRequest.payment_status === 'pendente' || activeRequest.payment_status === 'rejeitado') && (
+              <form onSubmit={handlePaymentSubmit} style={{
+                background: 'rgba(0, 18, 36, 0.85)',
+                border: '1px solid rgba(0, 199, 253, 0.25)',
+                borderRadius: '8px',
+                padding: '1.25rem'
+              }}>
+                <h3 style={{ fontSize: '1rem', fontWeight: '800', color: '#FFFFFF', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <Upload size={17} color="#00C7FD" />
+                  Submeter Comprovativo de Pagamento
+                </h3>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem', marginBottom: '1rem' }}>
+                  {/* Método de Pagamento */}
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label" style={{ fontSize: '0.82rem', fontWeight: '700' }}>
+                      Método Utilizado *
+                    </label>
+                    <select
+                      value={paymentMethod}
+                      onChange={(e) => setPaymentMethod(e.target.value)}
+                      className="form-select"
+                      style={{ fontSize: '0.85rem' }}
+                      required
+                    >
+                      <option value="mpesa">Vodacom M-Pesa</option>
+                      <option value="emola">Movitel e-Mola</option>
+                      <option value="bim">Millennium BIM (Transferência)</option>
+                      <option value="outro">Outro Banco / Depósito</option>
+                    </select>
+                  </div>
+
+                  {/* Referência da Transação */}
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label" style={{ fontSize: '0.82rem', fontWeight: '700' }}>
+                      Referência / Nº da Transação *
+                    </label>
+                    <input
+                      type="text"
+                      value={referenceCode}
+                      onChange={(e) => setReferenceCode(e.target.value)}
+                      placeholder="Ex: 849301280 ou TRX-889412"
+                      className="form-input"
+                      style={{ fontSize: '0.85rem' }}
+                      required
+                    />
+                  </div>
+                </div>
+
+                {/* Upload de Comprovativo */}
+                <div className="form-group" style={{ marginBottom: '1rem' }}>
+                  <label className="form-label" style={{ fontSize: '0.82rem', fontWeight: '700' }}>
+                    Anexar Comprovativo (Foto, Screenshot ou PDF)
+                  </label>
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,application/pdf"
+                    onChange={handleFileChange}
+                    className="form-input"
+                    style={{ fontSize: '0.825rem', padding: '0.5rem' }}
+                  />
+                  <span style={{ fontSize: '0.72rem', color: '#94A3B8', marginTop: '0.25rem', display: 'block' }}>
+                    * Formatos suportados: JPG, PNG, WEBP ou PDF (máx. 10 MB).
+                  </span>
+                </div>
+
+                {proofPreview && (
+                  <div style={{ marginBottom: '1rem', textAlign: 'center' }}>
+                    <img 
+                      src={proofPreview} 
+                      alt="Pré-visualização do Comprovativo" 
+                      style={{ maxHeight: '180px', borderRadius: '6px', border: '1px solid rgba(0, 199, 253, 0.4)' }} 
+                    />
+                  </div>
+                )}
+
+                {/* Observações Opcionais */}
+                <div className="form-group" style={{ marginBottom: '1.25rem' }}>
+                  <label className="form-label" style={{ fontSize: '0.82rem' }}>
+                    Observações Adicionais (Opcional)
+                  </label>
+                  <input
+                    type="text"
+                    value={paymentNotes}
+                    onChange={(e) => setPaymentNotes(e.target.value)}
+                    placeholder="Ex: Pago pelo titular Orlando Orjona às 14:30"
+                    className="form-input"
+                    style={{ fontSize: '0.85rem' }}
+                  />
+                </div>
+
+                <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                  {activeRequest.payment_status === 'em_analise' && (
+                    <button
+                      type="button"
+                      onClick={() => setShowPaymentForm(false)}
+                      className="btn btn-secondary btn-sm"
+                    >
+                      Cancelar
+                    </button>
+                  )}
+                  <button
+                    type="submit"
+                    disabled={submittingPayment || !referenceCode.trim()}
+                    className="btn btn-primary"
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', fontWeight: '700' }}
+                  >
+                    <Check size={16} />
+                    <span>{submittingPayment ? 'A Submeter Comprovativo...' : 'Confirmar e Enviar Comprovativo'}</span>
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        )}
+
+        {/* CENÁRIO 3: BLOQUEIO COM CURSO EM ANDAMENTO (REQUISITOS 3 & 4) */}
+        {isLockedByActiveCourse && (
+          <div style={{
+            background: 'linear-gradient(135deg, rgba(0, 32, 60, 0.95) 0%, rgba(0, 18, 36, 0.98) 100%)',
+            border: '2px solid rgba(0, 199, 253, 0.4)',
+            borderRadius: '12px',
+            padding: '2rem',
+            marginBottom: '2rem',
+            boxShadow: '0 8px 30px rgba(0, 0, 0, 0.4)'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem', marginBottom: '1.25rem', flexWrap: 'wrap' }}>
+              <div style={{
+                width: '48px',
+                height: '48px',
+                borderRadius: '50%',
+                background: 'rgba(0, 199, 253, 0.2)',
+                border: '1.5px solid #00C7FD',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0
+              }}>
+                <GraduationCap size={26} color="#00C7FD" />
+              </div>
+              <div>
+                <span className="badge badge-success" style={{ fontSize: '0.72rem', textTransform: 'uppercase' }}>
+                  Matrícula Ativa & Em Frequência
+                </span>
+                <h2 style={{ fontSize: '1.45rem', fontWeight: '900', color: '#FFFFFF', margin: '0.2rem 0 0 0' }}>
+                  Percurso Académico em Andamento
+                </h2>
+              </div>
+            </div>
+
+            {/* CARD DO CURSO ATIVO */}
+            <div style={{
+              background: 'rgba(0, 24, 48, 0.75)',
+              borderRadius: '8px',
+              border: '1px solid rgba(0, 163, 224, 0.25)',
+              padding: '1.25rem',
+              marginBottom: '1.5rem',
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+              gap: '1rem',
+              fontSize: '0.85rem'
+            }}>
+              <div>
+                <span style={{ color: '#94A3B8', fontSize: '0.72rem', textTransform: 'uppercase' }}>Curso Ativo</span>
+                <strong style={{ color: '#38BDF8', display: 'block', fontSize: '1.1rem', marginTop: '0.2rem' }}>
+                  {updateEligibility?.activeCourse?.title || currentCourse?.title || 'Formação em Andamento'}
+                </strong>
+                <span style={{ color: '#94A3B8', fontSize: '0.76rem' }}>
+                  Carga Horária: {updateEligibility?.activeCourse?.workload_hours || 60} Horas
+                </span>
+              </div>
+
+              <div>
+                <span style={{ color: '#94A3B8', fontSize: '0.72rem', textTransform: 'uppercase' }}>Estado da Matrícula</span>
+                <div style={{ marginTop: '0.25rem' }}>
+                  <span className="badge badge-success" style={{ fontSize: '0.76rem', fontWeight: '700' }}>
+                    Ativo (Regular)
+                  </span>
+                </div>
+                <span style={{ color: '#6EE7B7', fontSize: '0.75rem', display: 'block', marginTop: '0.2rem' }}>
+                  Aulas e conteúdos liberados
+                </span>
+              </div>
+
+              <div>
+                <span style={{ color: '#94A3B8', fontSize: '0.72rem', textTransform: 'uppercase' }}>Estudante Matriculado</span>
+                <strong style={{ color: '#FFFFFF', display: 'block', marginTop: '0.2rem' }}>
+                  {student?.full_name}
+                </strong>
+                <span style={{ color: '#00C7FD', fontFamily: 'monospace', fontSize: '0.78rem' }}>
+                  Código: {student?.student_code || student?.student_number || 'ZA'}
+                </span>
+              </div>
+            </div>
+
+            {/* MENSAGEM PEDAGÓGICA INSTITUCIONAL (REQUISITO 4) */}
+            <div style={{
+              background: 'rgba(0, 114, 206, 0.12)',
+              border: '1px solid rgba(0, 199, 253, 0.3)',
+              borderRadius: '8px',
+              padding: '1.25rem',
+              marginBottom: '1.5rem',
+              fontSize: '0.885rem',
+              color: '#BAE6FD',
+              lineHeight: 1.6
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: '800', color: '#00C7FD', marginBottom: '0.4rem' }}>
+                <ShieldCheck size={18} />
+                <span>Norma Académica de Transição Curricular</span>
+              </div>
+              <p style={{ margin: 0 }}>
+                O estudante encontra-se atualmente a frequentar a formação <strong>"{updateEligibility?.activeCourse?.title || currentCourse?.title}"</strong>. Conforme o regulamento pedagógico da Zaty Academy, a atualização ou transição para uma nova formação só é permitida após a <strong>conclusão com aproveitamento e emissão do respetivo certificado oficial</strong> da formação em curso.
+              </p>
+              <span style={{ display: 'block', marginTop: '0.65rem', fontSize: '0.8rem', color: '#94A3B8' }}>
+                * O formulário de solicitação de novos cursos encontra-se encerrado durante a frequência ativa do curso atual.
+              </span>
+            </div>
+
+            <div style={{ display: 'flex', gap: '0.85rem', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+              <Link to="/estudante/certificados" className="btn btn-secondary btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
+                <Award size={15} />
+                <span>Meus Certificados</span>
+              </Link>
+              <Link to="/estudante/cursos" className="btn btn-primary" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
+                <BookOpen size={16} />
+                <span>Aceder às Aulas do Meu Curso</span>
               </Link>
             </div>
           </div>
         )}
 
-        {/* CENÁRIO 3: FORMULÁRIO DE NOVA SOLICITAÇÃO (QUANDO NÃO HOUVER PEDIDO ATIVO PENDENTE) */}
-        {(!activeRequest || activeRequest.status === 'concluido' || activeRequest.status === 'rejeitada') && (
+        {/* CENÁRIO 4: FORMULÁRIO DE NOVA SOLICITAÇÃO (QUANDO ELEGÍVEL) */}
+        {isFormEligible && (
           <form onSubmit={handleConfirmSubmit}>
             {/* ÚLTIMA REJEIÇÃO SE HOUVER */}
             {activeRequest?.status === 'rejeitada' && (
@@ -429,16 +845,16 @@ export default function StudentCourseUpdate() {
                   Motivo: {activeRequest.rejection_reason || 'Não cumpre os requisitos curriculares.'}
                 </p>
                 <span style={{ fontSize: '0.75rem', color: '#CBD5E1', display: 'block', marginTop: '0.4rem' }}>
-                  Você pode escolher outro curso e submeter uma nova solicitação abaixo.
+                  Você pode selecionar outro curso e submeter uma nova solicitação abaixo.
                 </span>
               </div>
             )}
 
-            {/* SEÇÃO 1: IDENTIFICAÇÃO DO ESTUDANTE & CURSO ATUAL */}
+            {/* SEÇÃO 1: IDENTIFICAÇÃO DO ESTUDANTE & CURSO CONCLUÍDO */}
             <div className="glass-card" style={{ padding: '1.5rem', marginBottom: '1.5rem' }}>
               <h2 style={{ fontSize: '1.15rem', fontWeight: '800', color: '#FFFFFF', marginBottom: '1.15rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                 <User size={18} color="#00C7FD" />
-                1. Identificação do Estudante & Curso Atual
+                1. Identificação do Estudante & Percurso Curricular
               </h2>
 
               <div style={{
@@ -468,17 +884,17 @@ export default function StudentCourseUpdate() {
                 </div>
 
                 <div style={{ background: 'rgba(0, 24, 48, 0.65)', padding: '0.85rem', borderRadius: '6px', border: '1px solid rgba(0, 163, 224, 0.2)' }}>
-                  <span style={{ color: '#94A3B8', fontSize: '0.72rem', textTransform: 'uppercase' }}>Curso Anterior (Atual)</span>
-                  <strong style={{ color: '#F59E0B', fontSize: '1rem', display: 'block', marginTop: '0.2rem' }}>
-                    {currentCourse?.title || 'Nenhum curso ativo no momento'}
+                  <span style={{ color: '#94A3B8', fontSize: '0.72rem', textTransform: 'uppercase' }}>Formação Anterior Concluída</span>
+                  <strong style={{ color: '#34D399', fontSize: '1rem', display: 'block', marginTop: '0.2rem' }}>
+                    {currentCourse?.title || 'Formação Zaty Academy'}
                   </strong>
                   <span style={{ color: '#94A3B8', fontSize: '0.76rem' }}>
-                    {currentCourse?.workload_hours ? `${currentCourse.workload_hours}h • ` : ''}Estado: {activeEnrollment?.status || 'Regular'}
+                    Elegível para novo percurso formativo
                   </span>
                 </div>
 
                 <div style={{ background: 'rgba(0, 24, 48, 0.65)', padding: '0.85rem', borderRadius: '6px', border: '1px solid rgba(0, 163, 224, 0.2)' }}>
-                  <span style={{ color: '#94A3B8', fontSize: '0.72rem', textTransform: 'uppercase' }}>Data & Hora Atual (Tempo Real)</span>
+                  <span style={{ color: '#94A3B8', fontSize: '0.72rem', textTransform: 'uppercase' }}>Data & Hora Atual</span>
                   <strong style={{ color: '#00C7FD', fontSize: '0.925rem', display: 'block', marginTop: '0.2rem' }}>
                     {currentTimestamp.toLocaleDateString('pt-PT', { day: '2-digit', month: 'long', year: 'numeric' })}
                   </strong>
@@ -648,21 +1064,21 @@ export default function StudentCourseUpdate() {
                   <strong style={{ color: '#00C7FD', display: 'block', marginBottom: '0.25rem' }}>
                     2. Avaliação da Direção
                   </strong>
-                  A Direção avalia a sua solicitação. Caso aprovada, se o curso exigir pagamento, você receberá a indicação para liquidar a propina.
+                  A Direção avalia a sua solicitação. Caso aprovada, se o curso exigir propina, você poderá submeter o comprovativo <strong>aqui mesmo no módulo</strong>.
                 </div>
 
                 <div style={{ background: 'rgba(0, 24, 48, 0.6)', padding: '0.85rem', borderRadius: '6px', border: '1px solid rgba(0, 163, 224, 0.15)' }}>
                   <strong style={{ color: '#00C7FD', display: 'block', marginBottom: '0.25rem' }}>
                     3. Liberação Definitiva
                   </strong>
-                  Após a confirmação financeira, a matrícula no novo curso é ativada e você ganha <strong>acesso total aos módulos e aulas</strong>.
+                  Após a validação financeira, a matrícula no novo curso é ativada e você ganha <strong>acesso total aos módulos e aulas</strong>.
                 </div>
 
                 <div style={{ background: 'rgba(0, 24, 48, 0.6)', padding: '0.85rem', borderRadius: '6px', border: '1px solid rgba(0, 163, 224, 0.15)' }}>
                   <strong style={{ color: '#00C7FD', display: 'block', marginBottom: '0.25rem' }}>
-                    4. Histórico Preservado
+                    4. Encerramento do Formulário
                   </strong>
-                  O seu histórico anterior permanece com segurança na base de dados e no dossiê de auditoria da instituição.
+                  Uma vez matriculado e a frequentar o novo curso, o formulário de atualização é automaticamente encerrado.
                 </div>
               </div>
             </div>
@@ -697,6 +1113,63 @@ export default function StudentCourseUpdate() {
               </div>
             </div>
           </form>
+        )}
+
+        {/* CENÁRIO 5: HISTÓRICO DE ATUALIZAÇÕES DE CURSO DO ESTUDANTE */}
+        {requestHistory.length > 0 && (
+          <div className="glass-card" style={{ marginTop: '2rem', padding: '1.5rem' }}>
+            <h3 style={{ fontSize: '1.1rem', fontWeight: '800', color: '#FFFFFF', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <FileText size={18} color="#00C7FD" />
+              Histórico de Solicitações de Atualização
+            </h3>
+
+            <div style={{ overflowX: 'auto' }}>
+              <table className="data-table" style={{ width: '100%', fontSize: '0.825rem', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ background: 'rgba(0, 32, 60, 0.85)', textAlign: 'left', borderBottom: '1px solid rgba(0, 163, 224, 0.25)' }}>
+                    <th style={{ padding: '0.75rem 1rem', color: '#BAE6FD', textTransform: 'uppercase', fontSize: '0.72rem' }}>Data & Hora</th>
+                    <th style={{ padding: '0.75rem 1rem', color: '#BAE6FD', textTransform: 'uppercase', fontSize: '0.72rem' }}>Curso Solicitado</th>
+                    <th style={{ padding: '0.75rem 1rem', color: '#BAE6FD', textTransform: 'uppercase', fontSize: '0.72rem' }}>Valor</th>
+                    <th style={{ padding: '0.75rem 1rem', color: '#BAE6FD', textTransform: 'uppercase', fontSize: '0.72rem' }}>Estado</th>
+                    <th style={{ padding: '0.75rem 1rem', color: '#BAE6FD', textTransform: 'uppercase', fontSize: '0.72rem' }}>Notas da Direção</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {requestHistory.map((req) => (
+                    <tr key={req.id} style={{ borderBottom: '1px solid rgba(0, 163, 224, 0.12)' }}>
+                      <td style={{ padding: '0.75rem 1rem', whiteSpace: 'nowrap', color: '#CBD5E1' }}>
+                        {formatDateTime(req.created_at)}
+                      </td>
+                      <td style={{ padding: '0.75rem 1rem' }}>
+                        <strong style={{ color: '#FFFFFF', display: 'block' }}>{req.new_course_title}</strong>
+                        {req.previous_course_title && (
+                          <span style={{ color: '#94A3B8', fontSize: '0.72rem' }}>
+                            Anterior: {req.previous_course_title}
+                          </span>
+                        )}
+                      </td>
+                      <td style={{ padding: '0.75rem 1rem', color: '#00C7FD', fontWeight: '700' }}>
+                        {Number(req.new_course_price) > 0 ? formatCurrency(req.new_course_price) : 'Gratuito'}
+                      </td>
+                      <td style={{ padding: '0.75rem 1rem' }}>
+                        {req.status === 'pendente' && <span className="badge badge-warning" style={{ fontSize: '0.7rem' }}>Pendente</span>}
+                        {req.status === 'aprovada_aguardando_pagamento' && (
+                          req.payment_status === 'em_analise' 
+                            ? <span className="badge badge-info" style={{ fontSize: '0.7rem' }}>Pagamento em Análise</span>
+                            : <span className="badge badge-primary" style={{ fontSize: '0.7rem' }}>Aguardando Pagamento</span>
+                        )}
+                        {req.status === 'concluido' && <span className="badge badge-success" style={{ fontSize: '0.7rem' }}>Concluída / Matriculado</span>}
+                        {req.status === 'rejeitada' && <span className="badge badge-danger" style={{ fontSize: '0.7rem' }}>Rejeitada</span>}
+                      </td>
+                      <td style={{ padding: '0.75rem 1rem', color: '#94A3B8', fontSize: '0.78rem' }}>
+                        {req.rejection_reason || req.admin_notes || '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
         )}
       </main>
     </div>

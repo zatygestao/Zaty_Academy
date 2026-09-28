@@ -1896,6 +1896,91 @@ export function saveLocalCourseUpdateRequestsStore(requests) {
 }
 
 /**
+ * Verifica a elegibilidade do estudante para atualização de curso (Regra Académica Rigorosa)
+ * - Se o aluno tem um curso ativo (status 'ativo') sem certificado emitido: BLOQUEIA atualização.
+ * - Se o aluno tem solicitação pendente ou aguardando pagamento: BLOQUEIA nova solicitação.
+ * - Se o aluno concluiu o curso anterior com certificado: DESBLOQUEIA atualização para os restantes cursos elegíveis.
+ */
+export async function getStudentCourseUpdateEligibility(studentId) {
+  if (!studentId) {
+    return {
+      canRequestUpdate: false,
+      reason: 'sem_estudante',
+      message: 'Estudante não identificado.'
+    };
+  }
+
+  try {
+    // 1. Verificar solicitação ativa pendente ou aguardando pagamento
+    const activeRequest = await getStudentActiveCourseUpdateRequest(studentId);
+    if (activeRequest) {
+      return {
+        canRequestUpdate: false,
+        activeRequest,
+        reason: 'solicitacao_em_andamento',
+        status: activeRequest.status,
+        message: activeRequest.status === 'aprovada_aguardando_pagamento'
+          ? 'A sua solicitação foi aprovada pela Direção. Conclua o pagamento no módulo para liberar o novo curso.'
+          : 'Já possui uma solicitação de atualização sob análise da Direção Académica.'
+      };
+    }
+
+    // 2. Carregar matrículas do estudante
+    const enrollments = await getStudentEnrollments(studentId);
+
+    // 3. Carregar certificados emitidos para o estudante
+    const { data: certs } = await supabase
+      .from('academy_certificates')
+      .select('id, course_id, certificate_code, status, issued_at')
+      .eq('student_id', studentId)
+      .neq('status', 'revogado');
+
+    const certCourseIds = new Set((certs || []).map(c => c.course_id));
+
+    // 4. Identificar matrícula ativa
+    const activeEnr = (enrollments || []).find(e => e.status === 'ativo');
+
+    if (activeEnr) {
+      const activeCourseId = activeEnr.course_id || activeEnr.course?.id;
+      const isCertified = certCourseIds.has(activeCourseId);
+
+      // Se o curso ativo NÃO tem certificado emitido: BLOQUEIA A ATUALIZAÇÃO (Requisitos 3 & 4)
+      if (!isCertified) {
+        return {
+          canRequestUpdate: false,
+          activeEnrollment: activeEnr,
+          activeCourse: activeEnr.course || null,
+          hasCompletedWithCertificate: false,
+          reason: 'curso_em_andamento',
+          message: 'Você possui uma formação ativa em andamento. De acordo com o Regulamento Académico da Zaty Academy, a transição para um novo curso só é permitida após a conclusão formal com aproveitamento e emissão do respetivo certificado da formação atual.'
+        };
+      }
+    }
+
+    // 5. Se não tem curso ativo em andamento (ou o curso ativo já foi certificado):
+    const completedEnr = (enrollments || []).find(e => 
+      e.status === 'concluido' || certCourseIds.has(e.course_id || e.course?.id)
+    );
+
+    return {
+      canRequestUpdate: true,
+      activeEnrollment: activeEnr || null,
+      completedEnrollment: completedEnr || null,
+      hasCompletedWithCertificate: certCourseIds.size > 0,
+      reason: 'elegivel',
+      message: 'Elegível para solicitar uma nova formação no catálogo da academia.'
+    };
+  } catch (err) {
+    console.warn('Aviso ao verificar elegibilidade de atualização:', err);
+    return {
+      canRequestUpdate: false,
+      reason: 'erro_validacao',
+      message: 'Falha ao validar elegibilidade académica.'
+    };
+  }
+}
+
+/**
  * Solicitação oficial de atualização de curso pelo estudante
  * Cria requerimento com status 'pendente' aguardando avaliação da Direção Académica.
  */
@@ -1915,17 +2000,10 @@ export async function requestStudentCourseUpdate({
     throw new Error('O novo curso selecionado não pode ser igual ao curso atual.');
   }
 
-  // 1. Verificar se o estudante já possui uma solicitação pendente ou aguardando pagamento
-  const existingRequests = await getStudentCourseUpdateRequests(studentId);
-  const activePending = existingRequests.find(r => 
-    ['pendente', 'em_analise', 'aprovada_aguardando_pagamento'].includes(r.status)
-  );
-
-  if (activePending) {
-    const statusLabel = activePending.status === 'aprovada_aguardando_pagamento' 
-      ? 'Aprovada (Aguardando Pagamento)' 
-      : 'Pendente de Avaliação';
-    throw new Error(`Já possui uma solicitação de atualização em andamento [Estado: ${statusLabel}]. Por favor, aguarde o processamento pela Direção.`);
+  // 1. Validação central de elegibilidade para atualização (Requirement 3 & 4)
+  const updateElig = await getStudentCourseUpdateEligibility(studentId);
+  if (!updateElig.canRequestUpdate) {
+    throw new Error(updateElig.message);
   }
 
   // 2. Obter dados atuais do estudante e dos cursos
@@ -2034,7 +2112,7 @@ export async function requestStudentCourseUpdate({
 
   // 5. Salvar na store local resiliente
   const localStore = getLocalCourseUpdateRequestsStore();
-  const updatedLocal = [newRequest, ...localStore.filter(r => r.id !== newRequest.id && r.id !== reqId)];
+  const updatedLocal = [newRequest, ...localStore.filter(r => r.id !== newRequest.id && r.id !== reqId && !(r.student_id === studentId && r.new_course_id === newCourse.id))];
   saveLocalCourseUpdateRequestsStore(updatedLocal);
 
   // 6. Registar no log de auditoria oficial
@@ -2043,7 +2121,7 @@ export async function requestStudentCourseUpdate({
       action: 'COURSE_UPDATE_REQUESTED',
       description: `Estudante ${studentName} (${studentCode}) submeteu solicitação de atualização de "${previousCourse.title}" para "${newCourse.title}".`,
       resourceType: 'course_update',
-      resourceId: reqId,
+      resourceId: newRequest.id,
       userId: student.user_id,
       userName: studentName,
       details: newRequest
@@ -2087,12 +2165,17 @@ export async function requestStudentCourseUpdate({
 
 /**
  * Consulta todas as solicitações de atualização de curso (para o painel de Administração)
+ * DEDUPLICAÇÃO DETERMINÍSTICA: Garante que cada solicitação apareça exatamente uma vez.
  */
 export async function getCourseUpdateRequests(filters = {}) {
   const localList = getLocalCourseUpdateRequestsStore();
   const map = new Map();
+  const seenPairKeys = new Set();
+  const seenIds = new Set();
 
-  // 1. Carregar da tabela oficial no Supabase (se criada)
+  const getPairKey = (studentId, courseId) => `${studentId}_${courseId}`;
+
+  // 1. Carregar da tabela oficial no Supabase (academy_course_update_requests)
   try {
     const { data: dbRequests, error: dbErr } = await supabase
       .from('academy_course_update_requests')
@@ -2105,8 +2188,24 @@ export async function getCourseUpdateRequests(filters = {}) {
       .order('created_at', { ascending: false });
 
     if (!dbErr && dbRequests && dbRequests.length > 0) {
+      // Buscar pagamentos associados para exibir comprovativo e método no Admin
+      const paymentIds = dbRequests.map(r => r.payment_id).filter(Boolean);
+      const paymentsMap = new Map();
+      if (paymentIds.length > 0) {
+        try {
+          const { data: payList } = await supabase
+            .from('academy_payments')
+            .select('id, payment_method, reference_code, proof_file_url, proof_file_name, amount, status')
+            .in('id', paymentIds);
+          (payList || []).forEach(p => paymentsMap.set(p.id, p));
+        } catch (_) {}
+      }
+
       dbRequests.forEach(r => {
-        map.set(r.id, {
+        const pairKey = getPairKey(r.student_id, r.new_course_id);
+        const payment = r.payment_id ? paymentsMap.get(r.payment_id) : null;
+
+        const item = {
           id: r.id,
           student_id: r.student_id,
           student_name: r.student?.full_name || 'Estudante',
@@ -2126,30 +2225,59 @@ export async function getCourseUpdateRequests(filters = {}) {
           rejection_reason: r.rejection_reason,
           payment_status: r.payment_status,
           payment_id: r.payment_id,
+          payment_method: payment?.payment_method || null,
+          payment_reference_code: payment?.reference_code || null,
+          payment_amount: payment?.amount || null,
+          payment_proof_url: payment?.proof_file_url || null,
+          payment_proof_file_name: payment?.proof_file_name || null,
+          payment_receipt_status: payment?.status || null,
           reviewed_by: r.reviewed_by,
           reviewed_at: r.reviewed_at,
           created_at: r.created_at,
           updated_at: r.updated_at
-        });
+        };
+
+        map.set(r.id, item);
+        seenPairKeys.add(pairKey);
+        seenIds.add(r.id);
       });
     }
   } catch (err) {
     console.warn('Aviso ao consultar academy_course_update_requests no Supabase:', err?.message);
   }
 
-  // 1.5 Carregar da store local resiliente (com precedência se tiver atualização recente)
+  // 1.5 Carregar da store local resiliente (sem duplicar chaves existentes)
   localList.forEach(r => {
-    if (!map.has(r.id)) {
-      map.set(r.id, r);
-    } else {
+    const pairKey = getPairKey(r.student_id, r.new_course_id);
+
+    if (map.has(r.id)) {
       const inMap = map.get(r.id);
       if (new Date(r.updated_at || 0) >= new Date(inMap.updated_at || 0)) {
         map.set(r.id, { ...inMap, ...r });
       }
+    } else if (seenPairKeys.has(pairKey)) {
+      // Já existe no DB para este estudante e curso: mesclar dados se o local for mais recente, sem duplicar ID
+      for (const [existingId, existingItem] of map.entries()) {
+        if (getPairKey(existingItem.student_id, existingItem.new_course_id) === pairKey) {
+          if (new Date(r.updated_at || 0) >= new Date(existingItem.updated_at || 0)) {
+            map.set(existingId, {
+              ...existingItem,
+              ...r,
+              id: existingId // Preserva ID oficial do banco de dados
+            });
+          }
+          break;
+        }
+      }
+    } else {
+      // Item exclusivo não sincronizado ainda
+      map.set(r.id, r);
+      seenPairKeys.add(pairKey);
+      seenIds.add(r.id);
     }
   });
 
-  // 2. Carregar matrículas pendentes em academy_enrollments (para garantir visibilidade total cross-device)
+  // 2. Carregar matrículas pendentes em academy_enrollments (apenas se não houver registro para este par)
   try {
     const { data: pendingEnrs } = await supabase
       .from('academy_enrollments')
@@ -2167,92 +2295,89 @@ export async function getCourseUpdateRequests(filters = {}) {
       .order('created_at', { ascending: false });
 
     if (pendingEnrs && pendingEnrs.length > 0) {
-      // Obter cursos anteriores (ativos/concluídos) dos estudantes em lote
-      const studentIds = [...new Set(pendingEnrs.map(e => e.student_id))];
-      let priorCourseMap = new Map();
-      try {
-        const { data: priorEnrs } = await supabase
-          .from('academy_enrollments')
-          .select('student_id, course:academy_courses(id, title), status')
-          .in('student_id', studentIds)
-          .in('status', ['ativo', 'concluido']);
-
-        (priorEnrs || []).forEach(p => {
-          if (p.course && !priorCourseMap.has(p.student_id)) {
-            priorCourseMap.set(p.student_id, p.course);
-          }
-        });
-      } catch (_) {}
-
       pendingEnrs.forEach(enr => {
         const id = `enr_${enr.id}`;
-        // Não incluir se o mapa já tem essa solicitação (seja por id, ou pelo par student_id + new_course_id)
-        const alreadyExists = map.has(id) || Array.from(map.values()).some(
-          r => r.student_id === enr.student_id && (r.new_course_id === enr.course_id || ['pendente', 'em_analise', 'aprovada_aguardando_pagamento', 'concluido', 'rejeitada'].includes(r.status))
-        );
+        const pairKey = getPairKey(enr.student_id, enr.course_id);
 
-        if (!alreadyExists) {
-          const priorCourse = priorCourseMap.get(enr.student_id);
-          map.set(id, {
-            id,
-            enrollment_id: enr.id,
-            student_id: enr.student_id,
-            student_name: enr.student?.full_name || 'Estudante',
-            student_code: enr.student?.student_code || enr.student?.student_number || 'ZA',
-            student_email: enr.student?.email,
-            student_phone: enr.student?.phone,
-            previous_course_id: priorCourse?.id || null,
-            previous_course_title: priorCourse?.title || 'Formação Anterior',
-            new_course_id: enr.course_id,
-            new_course_title: enr.course?.title || 'Novo Curso',
-            new_course_price: enr.course?.price || 0,
-            new_course_workload: enr.course?.workload_hours || 60,
-            new_course_duration: enr.course?.duration || '3 Meses',
-            reason: 'Solicitação de atualização de formação',
-            status: 'pendente',
-            admin_notes: null,
-            rejection_reason: null,
-            payment_status: (enr.course?.price > 0) ? 'pendente' : 'isento',
-            created_at: enr.created_at,
-            updated_at: enr.updated_at || enr.created_at
-          });
+        if (seenPairKeys.has(pairKey) || seenIds.has(id)) {
+          return;
         }
+
+        // Não adicionar se o estudante já tiver qualquer solicitação de atualização ativa
+        const hasActiveForStudent = Array.from(map.values()).some(
+          r => r.student_id === enr.student_id && ['pendente', 'em_analise', 'aprovada_aguardando_pagamento'].includes(r.status)
+        );
+        if (hasActiveForStudent) return;
+
+        map.set(id, {
+          id,
+          enrollment_id: enr.id,
+          student_id: enr.student_id,
+          student_name: enr.student?.full_name || 'Estudante',
+          student_code: enr.student?.student_code || enr.student?.student_number || 'ZA',
+          student_email: enr.student?.email,
+          student_phone: enr.student?.phone,
+          previous_course_id: null,
+          previous_course_title: 'Formação Anterior',
+          new_course_id: enr.course_id,
+          new_course_title: enr.course?.title || 'Novo Curso',
+          new_course_price: enr.course?.price || 0,
+          new_course_workload: enr.course?.workload_hours || 60,
+          new_course_duration: enr.course?.duration || '3 Meses',
+          reason: 'Solicitação de atualização de formação',
+          status: 'pendente',
+          admin_notes: null,
+          rejection_reason: null,
+          payment_status: (enr.course?.price > 0) ? 'pendente' : 'isento',
+          created_at: enr.created_at,
+          updated_at: enr.updated_at || enr.created_at
+        });
+        seenPairKeys.add(pairKey);
+        seenIds.add(id);
       });
     }
   } catch (enrErr) {
     console.warn('Aviso ao consultar matrículas pendentes para solicitações de curso:', enrErr?.message);
   }
 
-  // 3. Carregar registos históricos da tabela de auditoria
+  // 3. Fallback de auditoria: estritamente se não houver registro para o pairKey ou ID
   try {
     const { data: auditLogs } = await supabase
       .from('academy_audit_logs')
       .select('*')
       .in('action', ['COURSE_UPDATE_REQUESTED', 'COURSE_UPDATE_STATUS_UPDATED', 'STUDENT_COURSE_UPDATED'])
       .order('created_at', { ascending: false })
-      .limit(100);
+      .limit(50);
 
     if (auditLogs && auditLogs.length > 0) {
       auditLogs.forEach(log => {
         if (log.details && (log.details.id || log.details.student_id)) {
           const id = log.details.id || `audit_${log.id}`;
-          if (!map.has(id)) {
-            map.set(id, {
-              id,
-              student_id: log.details.student_id,
-              student_name: log.details.student_name || log.user_name || 'Estudante',
-              student_code: log.details.student_code || 'ZA',
-              previous_course_id: log.details.previous_course_id,
-              previous_course_title: log.details.previous_course_title || 'Curso Anterior',
-              new_course_id: log.details.new_course_id,
-              new_course_title: log.details.new_course_title || log.details.course_title || 'Novo Curso',
-              new_course_price: log.details.new_course_price || 0,
-              reason: log.details.reason || 'Atualização de curso',
-              status: log.details.status || 'concluido',
-              created_at: log.details.created_at || log.created_at,
-              updated_at: log.details.updated_at || log.created_at
-            });
+          const studentId = log.details.student_id;
+          const courseId = log.details.new_course_id;
+          const pairKey = studentId && courseId ? getPairKey(studentId, courseId) : null;
+
+          if (seenIds.has(id) || (pairKey && seenPairKeys.has(pairKey))) {
+            return;
           }
+
+          map.set(id, {
+            id,
+            student_id: studentId,
+            student_name: log.details.student_name || log.user_name || 'Estudante',
+            student_code: log.details.student_code || 'ZA',
+            previous_course_id: log.details.previous_course_id,
+            previous_course_title: log.details.previous_course_title || 'Curso Anterior',
+            new_course_id: courseId,
+            new_course_title: log.details.new_course_title || log.details.course_title || 'Novo Curso',
+            new_course_price: log.details.new_course_price || 0,
+            reason: log.details.reason || 'Atualização de curso',
+            status: log.details.status || 'concluido',
+            created_at: log.details.created_at || log.created_at,
+            updated_at: log.details.updated_at || log.created_at
+          });
+          seenIds.add(id);
+          if (pairKey) seenPairKeys.add(pairKey);
         }
       });
     }
@@ -2288,12 +2413,137 @@ export async function getStudentActiveCourseUpdateRequest(studentId) {
 }
 
 /**
- * Parecer administrativo sobre a solicitação de atualização de curso (Aprovar / Rejeitar / Confirmar Pagamento)
+ * Submete comprovativo de pagamento diretamente dentro do módulo Atualizar Curso (Requisito 2)
+ */
+export async function submitCourseUpdatePaymentProof({
+  requestId,
+  studentId,
+  amount,
+  paymentMethod,
+  referenceCode = '',
+  proofFile = null,
+  notes = ''
+}) {
+  if (!requestId) throw new Error('Identificador da solicitação não fornecido.');
+  if (!studentId) throw new Error('Identificador do estudante não fornecido.');
+  if (!paymentMethod) throw new Error('Selecione o método de pagamento utilizado.');
+  if (!referenceCode?.trim()) throw new Error('Por favor informe a referência ou número da transação.');
+
+  const nowIso = new Date().toISOString();
+  let proofFileUrl = null;
+  let proofFileName = null;
+
+  // 1. Upload do comprovativo caso ficheiro seja fornecido
+  if (proofFile) {
+    try {
+      proofFileUrl = await uploadPrivateDocument(proofFile, 'payment_proofs');
+      proofFileName = proofFile.name;
+    } catch (uploadErr) {
+      console.warn('Aviso ao fazer upload do comprovativo:', uploadErr);
+    }
+  }
+
+  // 2. Registar na tabela academy_payments
+  let paymentId = null;
+  try {
+    const payment = await submitPayment({
+      studentId,
+      amount: Number(amount),
+      paymentType: 'atualizacao_curso',
+      paymentMethod,
+      referenceCode: referenceCode.trim(),
+      proofFileUrl,
+      proofFileName,
+      notes: notes?.trim() || 'Comprovativo referente à solicitação de atualização de curso'
+    });
+    if (payment?.id) paymentId = payment.id;
+  } catch (payErr) {
+    console.warn('Aviso ao registrar pagamento no academy_payments:', payErr?.message);
+  }
+
+  // 3. Atualizar a solicitação em academy_course_update_requests
+  const updatePayload = {
+    payment_status: 'em_analise',
+    payment_id: paymentId,
+    admin_notes: notes?.trim() 
+      ? `[Comprovativo: ${paymentMethod.toUpperCase()} Ref: ${referenceCode}] ${notes.trim()}`
+      : `[Comprovativo Submetido: ${paymentMethod.toUpperCase()} Ref: ${referenceCode}]`,
+    updated_at: nowIso
+  };
+
+  try {
+    const isSynthetic = String(requestId).startsWith('enr_') || String(requestId).startsWith('audit_');
+    if (!isSynthetic) {
+      await supabase
+        .from('academy_course_update_requests')
+        .update(updatePayload)
+        .eq('id', requestId);
+    } else {
+      await supabase
+        .from('academy_course_update_requests')
+        .update(updatePayload)
+        .eq('student_id', studentId);
+    }
+  } catch (dbErr) {
+    console.warn('Aviso ao atualizar academy_course_update_requests com comprovativo:', dbErr?.message);
+  }
+
+  // 4. Atualizar na store local resiliente
+  const localStore = getLocalCourseUpdateRequestsStore();
+  const updatedLocal = localStore.map(r => {
+    if (r.id === requestId || r.student_id === studentId) {
+      return {
+        ...r,
+        payment_status: 'em_analise',
+        payment_id: paymentId,
+        payment_method: paymentMethod,
+        payment_reference_code: referenceCode.trim(),
+        payment_proof_url: proofFileUrl,
+        payment_proof_file_name: proofFileName,
+        admin_notes: updatePayload.admin_notes,
+        updated_at: nowIso
+      };
+    }
+    return r;
+  });
+  saveLocalCourseUpdateRequestsStore(updatedLocal);
+
+  // 5. Notificar a Direção Académica / Financeira
+  try {
+    await supabase.from('academy_notifications').insert([{
+      student_id: studentId,
+      title: '💳 Comprovativo de Pagamento de Atualização Submetido',
+      message: `O estudante submeteu o comprovativo de pagamento (Ref: ${referenceCode}) para liberação do novo curso. Aguarda validação financeira.`,
+      type: 'payment_received',
+      is_read: false,
+      created_at: nowIso
+    }]);
+  } catch (_) {}
+
+  // 6. Broadcast em tempo real
+  broadcastCourseUpdate({
+    id: requestId,
+    student_id: studentId,
+    payment_status: 'em_analise',
+    payment_id: paymentId,
+    updated_at: nowIso
+  });
+
+  return {
+    success: true,
+    paymentId,
+    proofFileUrl,
+    paymentStatus: 'em_analise'
+  };
+}
+
+/**
+ * Parecer administrativo sobre a solicitação de atualização de curso (Aprovar / Rejeitar / Confirmar Pagamento / Rejeitar Pagamento)
  */
 export async function reviewCourseUpdateRequest({
   requestId,
   studentId,
-  decision, // 'aprovar' | 'rejeitar' | 'confirmar_pagamento_e_ativar'
+  decision, // 'aprovar' | 'rejeitar' | 'rejeitar_pagamento' | 'confirmar_pagamento_e_ativar'
   adminNotes = '',
   rejectionReason = '',
   adminUserId = null
@@ -2308,7 +2558,6 @@ export async function reviewCourseUpdateRequest({
   let request = localStore.find(r => r.id === requestId);
 
   if (!request) {
-    // Tenta encontrar em toda a lista
     const all = await getCourseUpdateRequests();
     request = all.find(r => r.id === requestId);
   }
@@ -2320,7 +2569,6 @@ export async function reviewCourseUpdateRequest({
   const nowIso = new Date().toISOString();
   const targetStudentId = studentId || request.student_id;
   const courseTitle = request.new_course_title || 'Novo Curso';
-  const previousTitle = request.previous_course_title || 'Curso Anterior';
 
   let newStatus = request.status;
   let newPaymentStatus = request.payment_status;
@@ -2350,6 +2598,8 @@ export async function reviewCourseUpdateRequest({
         .eq('course_id', request.new_course_id)
         .eq('status', 'pendente');
     } catch (_) {}
+  } else if (decision === 'rejeitar_pagamento') {
+    newPaymentStatus = 'rejeitado';
   } else if (decision === 'confirmar_pagamento_e_ativar') {
     return await confirmCourseUpdatePaymentAndActivate({
       requestId,
@@ -2414,8 +2664,9 @@ export async function reviewCourseUpdateRequest({
             updated_at: nowIso
           })
           .eq('id', existing.id);
+        updatedReq.id = existing.id;
       } else {
-        await supabase
+        const { data: inserted } = await supabase
           .from('academy_course_update_requests')
           .insert([{
             student_id: targetStudentId,
@@ -2430,7 +2681,16 @@ export async function reviewCourseUpdateRequest({
             reviewed_at: nowIso,
             created_at: request.created_at || nowIso,
             updated_at: nowIso
-          }]);
+          }])
+          .select('id')
+          .single();
+
+        if (inserted?.id) {
+          updatedReq.id = inserted.id;
+          saveLocalCourseUpdateRequestsStore(
+            localStore.map(r => r.id === requestId ? { ...updatedReq, id: inserted.id } : r)
+          );
+        }
       }
     }
   } catch (dbErr) {
@@ -2443,7 +2703,7 @@ export async function reviewCourseUpdateRequest({
       await supabase.from('academy_notifications').insert([{
         student_id: targetStudentId,
         title: '✅ Solicitação de Atualização Aprovada!',
-        message: `A sua solicitação de atualização para o curso "${courseTitle}" foi aprovada pela Direção. Por favor, efetue o pagamento da propina para concluir a atualização e liberar o seu acesso total aos conteúdos.`,
+        message: `A sua solicitação de atualização para o curso "${courseTitle}" foi aprovada pela Direção. Por favor, aceda ao módulo Atualizar Curso e efetue o pagamento da propina para concluir a ativação do seu percurso formativo.`,
         type: 'info',
         is_read: false,
         created_at: nowIso
@@ -2453,6 +2713,15 @@ export async function reviewCourseUpdateRequest({
         student_id: targetStudentId,
         title: '❌ Solicitação de Atualização Não Aprovada',
         message: `A sua solicitação de atualização para o curso "${courseTitle}" não foi aprovada pela Direção. Motivo: ${rejectionReason || adminNotes || 'Critérios regulamentares da academia.'}`,
+        type: 'warning',
+        is_read: false,
+        created_at: nowIso
+      }]);
+    } else if (decision === 'rejeitar_pagamento') {
+      await supabase.from('academy_notifications').insert([{
+        student_id: targetStudentId,
+        title: '⚠️ Comprovativo de Pagamento Não Aceite',
+        message: `O seu comprovativo de pagamento para o curso "${courseTitle}" não foi validado. Motivo: ${rejectionReason || adminNotes || 'Comprovativo ilegível ou referência não localizada.'}. Por favor, reenvie um comprovativo válido no módulo Atualizar Curso.`,
         type: 'warning',
         is_read: false,
         created_at: nowIso
@@ -2516,6 +2785,7 @@ export async function confirmCourseUpdatePaymentAndActivate({
       .eq('course_id', newCourseId);
 
     if (existingEnrs && existingEnrs.length > 0) {
+      // Ativa a primeira matrícula e cancela quaisquer duplicatas pendentes
       await supabase
         .from('academy_enrollments')
         .update({
@@ -2523,6 +2793,14 @@ export async function confirmCourseUpdatePaymentAndActivate({
           updated_at: nowIso
         })
         .eq('id', existingEnrs[0].id);
+
+      if (existingEnrs.length > 1) {
+        const extraIds = existingEnrs.slice(1).map(e => e.id);
+        await supabase
+          .from('academy_enrollments')
+          .update({ status: 'cancelado', updated_at: nowIso })
+          .in('id', extraIds);
+      }
     } else {
       await supabase
         .from('academy_enrollments')
@@ -2557,8 +2835,21 @@ export async function confirmCourseUpdatePaymentAndActivate({
         updated_at: nowIso
       })
       .eq('id', studentId);
+
+    // 3.1 Atualizar status do pagamento na tabela academy_payments caso exista payment_id
+    if (request.payment_id) {
+      await supabase
+        .from('academy_payments')
+        .update({
+          status: 'aprovado',
+          reviewed_by: adminUserId,
+          reviewed_at: nowIso,
+          updated_at: nowIso
+        })
+        .eq('id', request.payment_id);
+    }
   } catch (dbErr) {
-    console.warn('Aviso ao sincronizar matrículas no Supabase:', dbErr);
+    console.warn('Aviso ao sincronizar matrículas e pagamentos no Supabase:', dbErr);
   }
 
   // 4. Atualizar objeto da solicitação para 'concluido'
@@ -2572,11 +2863,11 @@ export async function confirmCourseUpdatePaymentAndActivate({
     updated_at: nowIso
   };
 
-  const updatedLocal = localStore.map(r => r.id === requestId ? updatedReq : r);
-  if (!updatedLocal.some(r => r.id === requestId)) updatedLocal.unshift(updatedReq);
+  const updatedLocal = localStore.map(r => (r.id === requestId || (r.student_id === studentId && r.new_course_id === newCourseId)) ? updatedReq : r);
+  if (!updatedLocal.some(r => r.id === updatedReq.id)) updatedLocal.unshift(updatedReq);
   saveLocalCourseUpdateRequestsStore(updatedLocal);
 
-  // Atualizar na base de dados Supabase (se criada)
+  // Atualizar na base de dados Supabase
   try {
     const isSynthetic = String(requestId).startsWith('enr_') || String(requestId).startsWith('audit_');
     if (!isSynthetic) {
@@ -2611,8 +2902,9 @@ export async function confirmCourseUpdatePaymentAndActivate({
             updated_at: nowIso
           })
           .eq('id', existing.id);
+        updatedReq.id = existing.id;
       } else {
-        await supabase
+        const { data: inserted } = await supabase
           .from('academy_course_update_requests')
           .insert([{
             student_id: studentId,
@@ -2626,12 +2918,16 @@ export async function confirmCourseUpdatePaymentAndActivate({
             reviewed_at: nowIso,
             created_at: request.created_at || nowIso,
             updated_at: nowIso
-          }]);
+          }])
+          .select('id')
+          .single();
+
+        if (inserted?.id) updatedReq.id = inserted.id;
       }
     }
   } catch (_) {}
 
-  // 5. Enviar Notificação Padrão Obrigatória de Inscrição Aprovada (Requisito 3)
+  // 5. Enviar Notificação Padrão Obrigatória de Inscrição Aprovada
   const approvedNotif = {
     student_id: studentId,
     title: 'Inscrição Aprovada com Sucesso!',
@@ -2659,7 +2955,7 @@ export async function confirmCourseUpdatePaymentAndActivate({
       action: 'COURSE_UPDATE_COMPLETED',
       description: `Atualização de curso concluída com sucesso para o estudante ${request.student_name}. Acesso total liberado.`,
       resourceType: 'course_update',
-      resourceId: requestId,
+      resourceId: updatedReq.id,
       userId: adminUserId,
       details: updatedReq
     });

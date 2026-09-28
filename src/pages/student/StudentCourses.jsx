@@ -62,7 +62,11 @@ export default function StudentCourses() {
   const [actionLoading, setActionLoading] = useState(false);
 
   const enrollments = useMemo(() => {
-    return deduplicateEnrollments(student?.enrollments || []);
+    const list = deduplicateEnrollments(student?.enrollments || []);
+    return [...list].sort((a, b) => {
+      const order = { ativo: 1, pendente: 2, concluido: 3, transferido: 4, trancado: 5, cancelado: 6 };
+      return (order[a.status] || 99) - (order[b.status] || 99);
+    });
   }, [student?.enrollments]);
   const validIndex = (selectedEnrollmentIndex >= 0 && selectedEnrollmentIndex < enrollments.length) ? selectedEnrollmentIndex : 0;
   const activeEnrollment = enrollments[validIndex] || enrollments[0];
